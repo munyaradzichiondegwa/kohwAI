@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kohwai-celery-worker
+  namespace: kohwai
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kohwai-celery-worker }
+  template:
+    metadata:
+      labels: { app: kohwai-celery-worker }
+    spec:
+      containers:
+        - name: worker
+          image: kohwai/api:latest
+          command: ["celery","-A","app.core.celery_app","worker","--loglevel=info","-Q","default,satellite,alerts,insurance,risk_model"]
+          envFrom: [{ secretRef: { name: kohwai-secrets } }]
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits:   { cpu: "500m", memory: "1Gi" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kohwai-celery-beat
+  namespace: kohwai
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kohwai-celery-beat }
+  template:
+    metadata:
+      labels: { app: kohwai-celery-beat }
+    spec:
+      containers:
+        - name: beat
+          image: kohwai/api:latest
+          command: ["celery","-A","app.core.celery_app","beat","--loglevel=info","--scheduler","celery.schedulers:PersistentScheduler"]
+          envFrom: [{ secretRef: { name: kohwai-secrets } }]
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "200m", memory: "512Mi" }

@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "KohwAI",
+    "slug": "kohwai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#1A7A4A" },
+    "android": {
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#1A7A4A" },
+      "permissions": ["CAMERA","RECORD_AUDIO","ACCESS_FINE_LOCATION","ACCESS_COARSE_LOCATION"]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "KohwAI uses the camera to identify crop pests and livestock diseases.",
+        "NSMicrophoneUsageDescription": "KohwAI records short audio clips for livestock disease diagnosis.",
+        "NSLocationWhenInUseUsageDescription": "KohwAI uses your location for hyper-local weather and water alerts."
+      }
+    },
+    "plugins": ["expo-router","expo-camera","expo-av","expo-location","expo-local-authentication"]
+  }
+}

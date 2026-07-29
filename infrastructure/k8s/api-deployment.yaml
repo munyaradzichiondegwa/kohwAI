@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kohwai-api
+  namespace: kohwai
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: kohwai-api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: kohwai-api }
+    spec:
+      containers:
+        - name: api
+          image: kohwai/api:latest
+          ports: [{ containerPort: 8000 }]
+          envFrom: [{ secretRef: { name: kohwai-secrets } }]
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits:   { cpu: "500m", memory: "1Gi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kohwai-api
+  namespace: kohwai
+spec:
+  selector: { app: kohwai-api }
+  ports: [{ port: 80, targetPort: 8000 }]

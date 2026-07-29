@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-green:    #1A7A4A;
+  --color-amber:    #E8A020;
+  --color-red:      #C0392B;
+  --color-dark-red: #7B241C;
+  --color-blue:     #1A5276;
+}
+
+html { font-family: 'Inter', system-ui, sans-serif; }

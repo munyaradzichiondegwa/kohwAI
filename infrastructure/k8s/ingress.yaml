@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kohwai-ingress
+  namespace: kohwai
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [api.kohwai.zw, app.kohwai.zw]
+      secretName: kohwai-tls
+  rules:
+    - host: api.kohwai.zw
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: kohwai-api, port: { number: 80 } }
+    - host: app.kohwai.zw
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: kohwai-web, port: { number: 80 } }
