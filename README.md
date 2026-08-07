@@ -100,8 +100,6 @@ cd kohwAI
 
 ### Environment variables
 
-There's no `.env.example` committed yet, so create a `.env` file at the repo root (both `docker-compose.yml` and the backend read it from there) with at least these keys. A ready-to-use template is included alongside this README, drop it in as `.env` and fill in real credentials as you get them.
-
 | Variable | Purpose | Local default / example |
 |---|---|---|
 | `DATABASE_URL` | Main Postgres connection | `postgresql://kohwai:secret@localhost:5434/kohwai` |
@@ -124,8 +122,7 @@ The full list with sensible defaults lives in `backend/app/core/config.py`. A co
 docker compose up -d db timescaledb redis mlflow prometheus grafana
 ```
 
-Actual host ports, straight from `docker-compose.yml` (they're deliberately offset from common defaults so this stack doesn't collide with other services you might have running):
-
+Actual host ports, straight from `docker-compose.yml` 
 | Service | Host port | Container port |
 |---|---|---|
 | PostgreSQL (`db`) | 5434 | 5432 |
@@ -177,7 +174,7 @@ npm install --legacy-peer-deps
 npm run dev
 ```
 
-Open `http://localhost:3010`. (The script is `next dev -p 3010`, not the Next.js default of 3000, so if `ALLOWED_ORIGINS` in your `.env` doesn't include `http://localhost:3010` you'll hit CORS errors on login.)
+Open `http://localhost:3010`.
 
 ### Mobile application
 
