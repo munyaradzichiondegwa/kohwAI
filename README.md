@@ -114,7 +114,7 @@ cd kohwAI
 | `SENTRY_DSN` | Optional error tracking | blank to disable |
 | `ALLOWED_ORIGINS` | CORS | must include `http://localhost:3010` (the web app's real dev port, see below) |
 
-The full list with sensible defaults lives in `backend/app/core/config.py`. A copy-paste `.env.example` matching it is provided alongside this README.
+The full list with sensible defaults lives in `backend/app/core/config.py`. 
 
 ### Start infrastructure
 
