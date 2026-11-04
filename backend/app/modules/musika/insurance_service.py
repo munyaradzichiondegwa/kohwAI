@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.musika import InsuranceEnrollment, PayoutRecord
 from app.utils.risk import compute_drought_index
+from app.utils.audit import write_audit_log
 
 
 def enroll(db: Session, user_id: str, district: str, season: str, ecocash_number: str | None) -> InsuranceEnrollment:
@@ -91,13 +92,16 @@ def evaluate_district_payout(db: Session, district: str, season: str, threshold:
     }
 
 
-def mark_payout_sent(db: Session, payout_id: str, ecocash_ref: str) -> PayoutRecord | None:
+def mark_payout_sent(db: Session, payout_id: str, ecocash_ref: str, admin_id: str | None = None) -> PayoutRecord | None:
     payout = db.query(PayoutRecord).filter(PayoutRecord.id == payout_id).first()
     if not payout:
         return None
+    before = {"status": payout.status, "ecocash_ref": payout.ecocash_ref}
     payout.status = "sent"
     payout.ecocash_ref = ecocash_ref
     payout.sent_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(payout)
+    write_audit_log(db, admin_id, "insurance.payout_marked_sent", "payout", str(payout.id),
+                    before=before, after={"status": "sent", "ecocash_ref": ecocash_ref})
     return payout

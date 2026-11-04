@@ -4,7 +4,9 @@
  * Phase 2 feature — model loaded from OTA bundle.
  */
 import * as tf from '@tensorflow/tfjs';
-import '@tensorflow/tfjs-react-native';
+// tfjs-react-native is intentionally not installed yet (Expo SDK 51 / expo-camera conflict, see package.json _notes).
+// Loaded optionally so the app still bundles; inference stays unavailable until it is added.
+try { require('@tensorflow/tfjs-react-native'); } catch { /* optional until Phase 2 */ }
 import * as FileSystem from 'expo-file-system';
 import type { DiagnosisResult } from '@kohwai/shared/types';
 import { AI_CONFIDENCE_GATE } from '@kohwai/shared/constants';
@@ -30,7 +32,8 @@ class CropDiagnostics {
     // Preprocess: decode base64 → tensor [1, 224, 224, 3]
     const imageTensor = tf.tidy(() => {
       const raw = tf.util.encodeString(imageBase64, 'base64') as Uint8Array;
-      const decoded = tf.node ? (tf.node as any).decodeImage(raw) : tf.tensor(Array.from(raw));
+      // TODO(Phase 2): replace with decodeJpeg from tfjs-react-native; this raw-byte fallback is NOT a valid image decode.
+      const decoded = (tf as any).node ? ((tf as any).node).decodeImage(raw) : tf.tensor(Array.from(raw));
       return decoded.resizeBilinear([224, 224]).expandDims(0).div(255.0);
     });
 

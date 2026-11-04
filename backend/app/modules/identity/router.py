@@ -19,8 +19,9 @@ async def otp_request(body: OTPRequest, request: Request, db: Session = Depends(
 
 
 @router.post("/otp/verify", response_model=TokenResponse, summary="Verify OTP and receive tokens")
-async def otp_verify(body: OTPVerify, db: Session = Depends(get_db)):
-    user, access, refresh = service.verify_otp(db, body.phone, body.otp, body.language, body.district)
+async def otp_verify(body: OTPVerify, request: Request, db: Session = Depends(get_db)):
+    user, access, refresh = service.verify_otp(db, body.phone, body.otp, body.language, body.district,
+                                               ip=request.client.host if request.client else "")
     return TokenResponse(
         access_token=access, refresh_token=refresh,
         user=UserOut(id=str(user.id), phone=user.phone, language=user.language,

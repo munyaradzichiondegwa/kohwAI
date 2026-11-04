@@ -1,7 +1,7 @@
 set -e
 BASE=http://127.0.0.1:8000/api/v1
 
-/home/claude/venv/bin/python /home/claude/kohwAI/backend/scripts/seed_admin.py 0779990003 > /dev/null
+python "$(cd "$(dirname "$0")/../.." && pwd)/scripts/seed_admin.py" 0779990003 > /dev/null
 
 login() {
   local phone=$1

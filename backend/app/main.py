@@ -14,7 +14,10 @@ if settings.SENTRY_DSN:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup: refuse to run outside development with the default JWT secret
+    # (anyone could forge admin tokens).
+    if settings.ENVIRONMENT != "development" and settings.SECRET_KEY in ("changeme", ""):
+        raise RuntimeError("SECRET_KEY must be set to a strong random value when ENVIRONMENT != 'development'")
     yield
     # Shutdown
 

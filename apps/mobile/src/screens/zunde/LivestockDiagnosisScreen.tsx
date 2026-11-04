@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { Camera, CameraView } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { livestockDiagnostics } from '../../ai/LivestockDiagnostics';
 import type { LivestockDiagnosisResult } from '@kohwai/shared/types';
@@ -10,7 +10,7 @@ const DISCLAIMER = 'This is an AI-powered suggestion. Please verify with an Agri
 type Step = 'camera' | 'audio_prompt' | 'recording' | 'results';
 
 export default function LivestockDiagnosisScreen() {
-  const [camPerm, requestCamPerm] = Camera.useCameraPermissions();
+  const [camPerm, requestCamPerm] = useCameraPermissions();
   const [step, setStep]     = useState<Step>('camera');
   const [results, setResults] = useState<LivestockDiagnosisResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -81,8 +81,7 @@ export default function LivestockDiagnosisScreen() {
   if (step === 'audio_prompt') return (
     <View style={s.center}>
       <Text style={s.heading}>🎙️ Audio Analysis Needed</Text>
-      <Text style={s.msg}>Vision confidence is low for a respiratory condition.{'
-'}Hold your phone 20cm from the animal and record a 3-second sound.</Text>
+      <Text style={s.msg}>Vision confidence is low for a respiratory condition.{'\n'}Hold your phone 20cm from the animal and record a 3-second sound.</Text>
       <TouchableOpacity style={s.btn} onPress={startRecording}><Text style={s.btnTxt}>Start Recording</Text></TouchableOpacity>
     </View>
   );

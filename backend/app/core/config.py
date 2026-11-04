@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     SECRET_KEY: str = "changeme"
     DEBUG: bool = False
+    # Dev convenience only; honoured solely when ENVIRONMENT == "development".
+    EXPOSE_DEV_OTP: bool = False
 
     # Database
     DATABASE_URL: str = "postgresql://kohwai:secret@localhost:5432/kohwai"
@@ -60,6 +62,6 @@ class Settings(BaseSettings):
     ALERT_DEDUP_HOURS: int = 6
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:3010", "http://localhost:3000", "http://localhost:8000"]
 
 settings = Settings()

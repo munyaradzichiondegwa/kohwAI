@@ -9,6 +9,7 @@ from app.models.zunde import PestSighting
 from app.models.mvura import BoreholeReport, Borehole
 from app.models.community import CommunityReport, ValidatorAssignment
 from app.models.user import User
+from app.utils.audit import write_audit_log
 
 
 def get_queue(db: Session, district: str | None = None) -> list[dict]:
@@ -102,4 +103,6 @@ def decide(db: Session, kind: str, item_id: str, validator_id: str, approve: boo
 
     db.commit()
     _record_review(db, validator_id)
+    write_audit_log(db, validator_id, "community.approve" if approve else "community.reject", kind, item_id,
+                    after={"reason": reason})
     return True

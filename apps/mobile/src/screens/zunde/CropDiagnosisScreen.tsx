@@ -1,13 +1,13 @@
 import { useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { Camera, CameraView } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { cropDiagnostics } from '../../ai/CropDiagnostics';
 import type { DiagnosisResult } from '@kohwai/shared/types';
 
 const DISCLAIMER = 'This is an AI-powered suggestion. Please verify with an Agritex officer before treatment.';
 
 export default function CropDiagnosisScreen() {
-  const [permission, requestPermission] = Camera.useCameraPermissions();
+  const [permission, requestPermission] = useCameraPermissions();
   const [results, setResults]   = useState<DiagnosisResult[] | null>(null);
   const [loading, setLoading]   = useState(false);
   const cameraRef = useRef<CameraView>(null);

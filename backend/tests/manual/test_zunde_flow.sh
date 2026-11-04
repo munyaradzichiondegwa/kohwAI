@@ -2,7 +2,7 @@ set -e
 BASE=http://127.0.0.1:8000/api/v1
 
 echo "--- seed admin user ---"
-/home/claude/venv/bin/python /home/claude/kohwAI/backend/scripts/seed_admin.py 0779990001
+python "$(cd "$(dirname "$0")/../.." && pwd)/scripts/seed_admin.py" 0779990001
 
 echo "--- login as admin (dev OTP) ---"
 REQ=$(curl -s -X POST $BASE/auth/otp/request -H "Content-Type: application/json" -d '{"phone":"0779990001"}')

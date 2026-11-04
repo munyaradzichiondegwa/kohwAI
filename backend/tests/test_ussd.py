@@ -1,12 +1,9 @@
 """Tests for USSD handler."""
-import pytest
-from httpx import AsyncClient
-from app.main import app
 
 
-@pytest.mark.asyncio
-async def test_main_menu():
-    async with AsyncClient(app=app, base_url="http://test") as client:
+
+async def test_main_menu(client):
+    if True:
         resp = await client.post("/api/v1/ussd/callback", data={
             "sessionId": "test-session-1",
             "serviceCode": "*123#",
@@ -17,9 +14,8 @@ async def test_main_menu():
     assert "CON Welcome to KohwAI" in resp.text
 
 
-@pytest.mark.asyncio
-async def test_zunde_menu():
-    async with AsyncClient(app=app, base_url="http://test") as client:
+async def test_zunde_menu(client):
+    if True:
         resp = await client.post("/api/v1/ussd/callback", data={
             "sessionId": "test-session-2",
             "serviceCode": "*123#",
@@ -29,10 +25,9 @@ async def test_zunde_menu():
     assert "Zunde" in resp.text
 
 
-@pytest.mark.asyncio
-async def test_crop_triage_result():
+async def test_crop_triage_result(client):
     """Symptom: yellow leaves (1) + Maize (1) → disease + disclaimer."""
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    if True:
         resp = await client.post("/api/v1/ussd/callback", data={
             "sessionId": "test-session-3",
             "serviceCode": "*123#",

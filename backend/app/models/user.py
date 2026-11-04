@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.models.base import Base, UUIDMixin, TimestampMixin
@@ -30,8 +30,7 @@ class OTPLog(Base, UUIDMixin, TimestampMixin):
 class AuditLog(Base, UUIDMixin):
     """Immutable. No UPDATE or DELETE ever issued against this table."""
     __tablename__ = "audit_logs"
-    from sqlalchemy import DateTime as DT, func as fn
-    timestamp   = Column(DT(timezone=True), server_default="now()", nullable=False, index=True)
+    timestamp   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     user_id     = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     action      = Column(String(100), nullable=False, index=True)
     entity_type = Column(String(100), nullable=False)

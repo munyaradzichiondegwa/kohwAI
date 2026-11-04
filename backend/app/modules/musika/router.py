@@ -85,7 +85,7 @@ async def evaluate_payout(body: EvaluatePayoutRequest, db: Session = Depends(get
 
 @router.post("/insurance/payouts/{payout_id}/mark-sent", summary="Record that a payout was actually sent via EcoCash out-of-band (admin)")
 async def mark_sent(payout_id: str, body: MarkSentRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    payout = insurance_service.mark_payout_sent(db, payout_id, body.ecocash_ref)
+    payout = insurance_service.mark_payout_sent(db, payout_id, body.ecocash_ref, str(admin.id))
     if not payout:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Payout not found")
     return {"status": "recorded as sent"}

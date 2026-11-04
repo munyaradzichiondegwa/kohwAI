@@ -3,6 +3,7 @@ Defaults are seeded lazily on first read so the admin panel always has
 something sensible to show, without requiring a separate seed step."""
 from sqlalchemy.orm import Session
 from app.models.settings import PlatformSetting
+from app.utils.audit import write_audit_log
 
 DEFAULTS = {
     "feature_flags": {
@@ -35,6 +36,7 @@ def get_setting(db: Session, key: str) -> PlatformSetting | None:
 
 def upsert_setting(db: Session, key: str, value, description: str | None, updated_by: str) -> PlatformSetting:
     setting = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
+    before = setting.value if setting else None
     if setting:
         setting.value = value
         setting.updated_by = updated_by
@@ -45,4 +47,5 @@ def upsert_setting(db: Session, key: str, value, description: str | None, update
         db.add(setting)
     db.commit()
     db.refresh(setting)
+    write_audit_log(db, updated_by, "settings.update", "platform_setting", key, before=before, after=value)
     return setting
