@@ -100,6 +100,16 @@ cd kohwAI
 
 ### Environment variables
 
+```bash
+cp .env.example .env          # required: docker-compose's api/celery services read this file
+cp .env.example backend/.env  # only if running the API on the host (then edit hosts/ports below)
+```
+
+When running the backend on your **host** (not in Docker), edit `backend/.env` so `DATABASE_URL`/`REDIS_URL`
+point at `localhost` and the published ports (Postgres `5434`, Redis `6382`) instead of the compose service names.
+Set `EXPOSE_DEV_OTP=true` to have `/auth/otp/request` echo the code locally (honoured only when `ENVIRONMENT=development`).
+Outside development the API refuses to start with the default `SECRET_KEY`.
+
 | Variable | Purpose | Local default / example |
 |---|---|---|
 | `DATABASE_URL` | Main Postgres connection | `postgresql://kohwai:secret@localhost:5434/kohwai` |
@@ -331,7 +341,7 @@ Requirements: `requirements-ml.txt` has scikit-learn, numpy, pandas, and mlflow;
 
 ### Repo housekeeping worth knowing about
 - **No `LICENSE` file is currently committed**, even though this README (and the original one) describe the project as MIT-licensed. If MIT is the intent, add a `LICENSE` file; the reference below to "see LICENSE" isn't accurate until one exists.
-- No `.env.example` was committed (`.env` itself is correctly gitignored); one is included alongside this README.
+- `.env.example` is committed at the repo root; `.env` itself stays gitignored.
 
 ---
 
@@ -446,6 +456,15 @@ All routes are prefixed `/api/v1` unless noted. Full interactive docs at `/docs`
 ---
 
 ## 🧪 Testing
+
+Backend tests run against a **separate** database and need Postgres + Redis running:
+
+```bash
+createdb -h localhost -p 5434 -U kohwai kohwai_test      # once (see backend/pytest.ini for the URL it uses)
+cd backend && pip install -r requirements.txt && python -m pytest
+```
+
+CI (`.github/workflows/ci.yml`) runs the same backend tests plus web/mobile type-checks and the web build.
 
 ```bash
 cd backend
