@@ -202,7 +202,7 @@ Set `EXPO_PUBLIC_API_URL` (used in `src/services/api.ts` and the OTA updater) so
 
 ### USSD (`*123#`)
 
-Built on a real FastAPI callback (`POST /api/v1/ussd/callback`) wired to Africa's Talking, with a session handler enforcing max 4 menu levels, 160 characters per screen, and a consistent `0=Back / 9=Main Menu` convention. The implemented flow (`docs/ussd-flows/main-menu.md`):
+Built on a real FastAPI callback (`POST /api/v1/ussd/callback`) wired to Africa's Talking, Stateless (Africa's Talking sends the cumulative input), `0=Back / 9=Main Menu`, and every reachable screen is **tested to be ≤160 characters** (`backend/tests/test_ussd.py` walks the whole menu tree). Every number shown comes from the database: recent weather, planting guide and solar screens read the persisted NASA POWER readings; boreholes, listings and insurance status read real records; and when data does not exist the screen says so. Pest/borehole reports and listings are created as *pending* records (same rules as the web app) and need a registered phone — registration with consent is on USSD under *5. My account*. English only for now (no Shona/Ndebele copy has been written, so there is no fake "change language" option). Outside development, set `USSD_ALLOWED_IPS` (Africa's Talking doesn't sign callbacks); an empty list rejects all USSD traffic. *The menu diagram in `docs/ussd-flows/main-menu.md` predates this rewrite — treat the code and `backend/app/modules/ussd/menus.py` as authoritative.*
 
 ```
 *123# -> MAIN MENU
@@ -268,7 +268,7 @@ One real, well-built endpoint: a 48-hour battery/solar forecast (`GET /battery-f
 Rules-based symptom triage (shares the same decision-tree approach as Zunde) and animal profile registration.
 
 ### 🏘 Community & Validation (`/community`)
-A pending-items queue that validators and admins can approve or reject, a general community report endpoint, and a validator/admin listing. Every action is written to an immutable audit log (user, action, entity, before/after state, IP, timestamp; no updates or deletes against that table).
+A pending-items queue that validators and admins can approve or reject, a general community report endpoint, and a validator/admin listing. Validators only see reports from districts an admin assigned them (`POST /community/validators`), can never review their own reports, must give a reason to reject, and a borehole report only changes the public status once approved. Logins, registrations, validator decisions, settings changes and payout changes are written to an append-only audit log (database triggers block UPDATE/DELETE/TRUNCATE). Not every endpoint is audited yet.
 
 ### 📊 Analytics (`/analytics`)
 An admin overview endpoint backed by real database counts, no simulated or placeholder figures.
@@ -283,7 +283,7 @@ Rule-based correlation logic that reads real rows across the other modules, deli
 
 ## 🔴 Real-Time Alerts
 
-A WebSocket endpoint (`/ws/alerts/{district}`) broadcasts alerts to connected PWA sessions per district, on top of the SMS/push channels. This isn't mentioned in the app's marketing copy but it's a real part of `main.py`.
+A WebSocket endpoint (`/ws/alerts/{district}`) exists in `main.py`, but **nothing publishes to it yet and it is not authenticated** — the web app polls `/alerts/active` instead. Treat WebSocket delivery as not implemented.
 
 ---
 
@@ -293,9 +293,9 @@ Scheduled via Celery Beat, timezone `Africa/Harare`, monitored through Flower on
 
 | Task | Schedule | What it does | Status |
 |---|---|---|---|
-| `ingest-satellite-data` | every 6h | Pulls NASA POWER weather (temp, rainfall, solar) per district into Redis | Implemented; persisting to the TimescaleDB hypertable is still a TODO |
+| `ingest-satellite-data` | every 6h | Pulls the last ~45 days of NASA POWER weather per district and upserts daily rows (rainfall, temps, solar, trailing-30-day drought index) into `satellite_readings`; missing/`-999` days are skipped | Implemented (in PostgreSQL; the TimescaleDB hypertable is not used) |
 | `run-risk-model` | daily 02:00 | Scores districts 0-100 for livestock disease risk | Reads cached weather; loading historical outbreak data is still a TODO |
-| `check-insurance-triggers` | daily 02:30 | Creates pending drought insurance payouts when the real index crosses the threshold | Implemented |
+| `check-insurance-triggers` | daily 02:30 | Creates pending payouts when the rules in `insurance_service.py` hold: inside the Nov–Mar season, index ≥ threshold for N consecutive days, enrolled ≥14 days before the dry spell, one payout per enrolment | Implemented and tested; enrolment is OFF until an admin enables the `musika_insurance_enrollment` flag (a licensed underwriter is required before real payouts) |
 | `dispatch-alerts` | every 5 min | Sends queued SMS/push/WebSocket alerts | Scheduled and logging, but the actual DB query and send calls are still a TODO |
 
 ---
@@ -317,7 +317,7 @@ Requirements: `requirements-ml.txt` has scikit-learn, numpy, pandas, and mlflow;
 ## ✅ Implementation Status
 
 ### Implemented and real
-- Phone + OTP auth, JWT sessions, role-based access, immutable audit logging
+- Phone + OTP auth, JWT sessions, role-based access, append-only audit logging (partial coverage)
 - Zunde: crop triage, pest sightings, advisory cards, planting calendar, drought risk score (all with disclosed heuristics)
 - Livestock: triage, animal registration
 - Mvura: borehole registry and status reporting
@@ -325,11 +325,16 @@ Requirements: `requirements-ml.txt` has scikit-learn, numpy, pandas, and mlflow;
 - Community: reports and validator approve/reject queue
 - Analytics: real DB-backed admin overview
 - Cross-pillar intelligence: rule-based correlation engine over live data
-- Settings, WebSocket district alerts, USSD gateway across all four pillars
+- Settings; USSD for all four pillars with real data (see above)
 - Satellite ingestion: live NASA POWER calls every 6 hours, Redis-cached
 - AI training pipelines: complete and runnable, awaiting a labeled dataset
 
 ### Partially implemented
+- WebSocket alerts: endpoint exists but nothing broadcasts and it is unauthenticated
+- USSD: no PIN login yet (identity is the SIM/phone number), English only
+- Triage rules (`ussd/rules_engine.py` → `shared/rules/rules.json`) are **not yet signed off by Agritex / Veterinary Services**; coverage is maize+sorghum and cattle+poultry only
+- Helpline numbers must be set (`VET_SERVICES_CONTACT`, `AGRITEX_CONTACT`) — none are shipped
+- Map tiles default to openstreetmap.org (no offline tiles); set `NEXT_PUBLIC_TILE_URL` for production
 - Alert dispatch worker runs on schedule but the send logic (SMS/push/WebSocket) is still a TODO
 - Risk model worker is missing historical outbreak data
 - Satellite data isn't yet persisted to TimescaleDB, only cached in Redis

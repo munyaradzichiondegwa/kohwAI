@@ -28,4 +28,6 @@ class BoreholeReport(Base, UUIDMixin, TimestampMixin):
     validated_by = Column(UUID(as_uuid=True), nullable=True)
     validated_at = Column(DateTime(timezone=True), nullable=True)
     rejection_reason = Column(Text, nullable=True)
+    # pending -> approved | rejected. `validated` is kept for backwards compatibility only.
+    status       = Column(String(20), nullable=False, default="pending", server_default="pending", index=True)
     borehole = relationship("Borehole", back_populates="reports")

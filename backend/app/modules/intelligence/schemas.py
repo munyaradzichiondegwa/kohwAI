@@ -1,3 +1,4 @@
+from app.utils.validation import District
 # Pydantic schemas for Cross-Pillar Intelligence Engine
 from pydantic import BaseModel
 from typing import Optional
@@ -18,4 +19,4 @@ class InsightOut(BaseModel):
 
 
 class DistrictEvaluateRequest(BaseModel):
-    district: str
+    district: District

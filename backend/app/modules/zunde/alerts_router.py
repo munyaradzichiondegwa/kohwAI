@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,8 @@ from app.core.database import get_db
 from app.api.v1.deps import get_current_user, require_admin
 from app.models.alerts import Alert
 from app.models.user import User
+from app.utils.audit import write_audit_log
+from app.utils.validation import District
 
 router = APIRouter()
 
@@ -43,14 +46,24 @@ async def get_active_alerts(
     ]
 
 
-@router.post("", summary="Create an alert (admin/worker only)")
-async def create_alert(payload: dict, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    required = {"pillar", "type", "severity", "title", "body", "district"}
-    missing = required - payload.keys()
-    if missing:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Missing fields: {', '.join(missing)}")
-    alert = Alert(**{k: payload[k] for k in required}, extra_data=payload.get("extra_data"))
+class AlertCreate(BaseModel):
+    pillar: str = Field(..., pattern="^(zunde|mvura|simba|musika|livestock|community)$")
+    type: str = Field(..., min_length=2, max_length=50)
+    severity: str = Field(..., pattern="^(green|amber|red|darkRed|blue)$")
+    title: str = Field(..., min_length=3, max_length=300)
+    body: str = Field(..., min_length=3, max_length=2000)
+    district: District
+    expires_at: Optional[datetime] = None
+    extra_data: Optional[dict] = None
+
+
+@router.post("", summary="Create an alert (admin only)")
+@router.post("/", include_in_schema=False)      # same route with a trailing slash: no 307 redirect on POST
+def create_alert(body: AlertCreate, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    alert = Alert(**body.model_dump())
     db.add(alert)
     db.commit()
     db.refresh(alert)
+    write_audit_log(db, str(user.id), "alert.create", "alert", str(alert.id),
+                    after={"severity": body.severity, "district": body.district, "title": body.title})
     return {"id": str(alert.id)}

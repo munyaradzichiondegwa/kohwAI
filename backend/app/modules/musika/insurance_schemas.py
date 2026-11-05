@@ -1,13 +1,17 @@
 # Pydantic schemas for parametric insurance (part of Musika)
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field, AfterValidator
+from typing import Annotated, Optional
 from datetime import datetime
+
+from app.utils.validation import District, Season, check_ecocash
+
+EcoCash = Annotated[Optional[str], AfterValidator(check_ecocash)]
 
 
 class EnrollmentRequest(BaseModel):
-    district: str
-    season: str  # e.g. "2026-27"
-    ecocash_number: Optional[str] = None
+    district: District
+    season: Season  # e.g. "2026-27"
+    ecocash_number: EcoCash = None
 
 
 class EnrollmentOut(BaseModel):
@@ -34,10 +38,10 @@ class PayoutOut(BaseModel):
 
 
 class MarkSentRequest(BaseModel):
-    ecocash_ref: str
+    ecocash_ref: str = Field(..., min_length=4, max_length=200)
 
 
 class EvaluatePayoutRequest(BaseModel):
-    district: str
-    season: str
-    drought_index_threshold: int = 60
+    district: District
+    season: Season
+    drought_index_threshold: Optional[int] = Field(None, ge=1, le=100)  # default: settings.INSURANCE_DROUGHT_THRESHOLD

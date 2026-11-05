@@ -1,4 +1,5 @@
 # FastAPI router for Cross-Pillar Intelligence Engine
+import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -21,13 +22,13 @@ async def my_insights(db: Session = Depends(get_db), user: User = Depends(get_cu
 
 
 @router.post("/insights/{insight_id}/dismiss", summary="Dismiss an insight")
-async def dismiss(insight_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def dismiss(insight_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     ok = service.dismiss(db, insight_id, user)
     return {"dismissed": ok}
 
 
 @router.post("/evaluate/district", summary="Run district-wide rules (pest outbreak, rains onset) — admin/ops trigger, intended to be called by a scheduled job")
-async def evaluate_district(body: DistrictEvaluateRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def evaluate_district(body: DistrictEvaluateRequest, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     pest = service.evaluate_pest_outbreak(db, body.district)
     rains = service.evaluate_rains_onset(db, body.district)
     return {

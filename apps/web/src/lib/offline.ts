@@ -1,110 +1,134 @@
-import { apiClient } from './api';
-import { db } from './db';
-import type { Alert, Borehole, MarketListing } from '@kohwai/shared/types';
-
 /**
- * These are clearly-labelled seed/demo records, not live data from
- * Agritex, ZINWA, or ZESA. They exist so the app is usable and
- * demonstrable before the real backend + data feeds are connected.
- * They are only written to IndexedDB once, on first run.
+ * Data access with real offline support.
+ *
+ * Reads : network first -> every successful response is saved to IndexedDB -> if (and only if) there is no
+ *         network, serve the last saved real response. HTTP errors (401/403/500...) are NOT hidden behind
+ *         cached data: they are thrown so the UI can say what went wrong.
+ * Writes: if there is no network the write goes to an outbox and is replayed (in order) when we are back
+ *         online. The caller is told 'queued' — never "saved" — so the UI cannot claim something that has not
+ *         reached the server.
+ * Demo  : invented records are only used when NEXT_PUBLIC_DEMO_MODE=true and nothing real is available.
  */
-const SEED_ALERTS: Alert[] = [
-  { id: 'seed-1', type: 'weather', severity: 'amber', title: 'Dry spell forecast',
-    body: 'Below-average rainfall expected over the next 10 days. Consider drought-tolerant planting.',
-    pillar: 'zunde', district: 'Chipinge', createdAt: new Date().toISOString() },
-  { id: 'seed-2', type: 'pest', severity: 'red', title: 'Fall Armyworm reported nearby',
-    body: 'Community reports of Fall Armyworm in your district. Inspect maize leaves for chewing damage.',
-    pillar: 'zunde', district: 'Gokwe', createdAt: new Date().toISOString() },
-];
+import type { Table } from 'dexie';
+import type { Alert, Borehole, MarketListing } from '@kohwai/shared/types';
+import { apiClient, ApiError, isOfflineError } from './api';
+import { toCamel, toSnake } from './case';
+import { db } from './db';
+import { DEMO_ALERTS, DEMO_BOREHOLES, DEMO_LISTINGS } from './demoData';
 
-const SEED_BOREHOLES: Borehole[] = [
-  { id: 'seed-bh-1', name: 'Chipinge Ward 3 Borehole', village: 'Mutema', lat: -20.19, lng: 32.62,
-    status: 'working', lastVerified: new Date().toISOString() },
-  { id: 'seed-bh-2', name: 'Gokwe North Borehole 12', village: 'Nembudziya', lat: -17.99, lng: 28.93,
-    status: 'low', lastVerified: new Date().toISOString() },
-  { id: 'seed-bh-3', name: 'Binga Kariangwe Borehole', village: 'Kariangwe', lat: -17.62, lng: 27.34,
-    status: 'dry', lastVerified: new Date().toISOString() },
-];
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
 
-const SEED_LISTINGS: MarketListing[] = [
-  { id: 'seed-ml-1', type: 'seed', title: 'SC403 Maize Seed', description: 'Certified seed, 10kg bags',
-    quantity: 40, unit: 'kg', priceUsd: 1.8, district: 'Gweru', sellerPhone: '077•••1234',
-    expiresAt: new Date(Date.now() + 14 * 86400000).toISOString() },
-  { id: 'seed-ml-2', type: 'produce', title: 'Fresh Tomatoes', description: 'Grade A, harvested this week',
-    quantity: 200, unit: 'kg', priceUsd: 0.6, district: 'Mutare', sellerPhone: '071•••5678',
-    expiresAt: new Date(Date.now() + 5 * 86400000).toISOString() },
-  { id: 'seed-ml-3', type: 'livestock', title: 'Weaner Calves', description: '3 healthy weaners, Brahman cross',
-    quantity: 3, unit: 'head', priceUsd: 220, district: 'Kwekwe', sellerPhone: '073•••9012',
-    aiVerifiedHealthy: false, expiresAt: new Date(Date.now() + 21 * 86400000).toISOString() },
-];
+export type Source = 'network' | 'cache' | 'demo';
+export interface Result<T> { data: T[]; source: Source; /** ISO time of the saved copy when source === 'cache' */ cachedAt?: string; }
 
-let seeded = false;
-async function ensureSeeded() {
-  if (seeded) return;
-  seeded = true;
-  const [aCount, bCount, lCount] = await Promise.all([
-    db.alerts.count(), db.boreholes.count(), db.listings.count(),
-  ]);
-  if (aCount === 0) await db.alerts.bulkAdd(SEED_ALERTS);
-  if (bCount === 0) await db.boreholes.bulkAdd(SEED_BOREHOLES);
-  if (lCount === 0) await db.listings.bulkAdd(SEED_LISTINGS);
-}
-
-/** True once we've confirmed the real backend responded at least once this session. */
-export let backendReachable = false;
-
-export async function getAlerts(): Promise<Alert[]> {
+async function readThrough<T extends { id: string }>(opts: {
+  table: Table<T, string>;
+  kvKey: string;
+  fetch: () => Promise<T[]>;
+  /** remove the cached rows this response replaces (so deleted/expired server rows disappear) */
+  clearScope: () => Promise<unknown>;
+  readCache: () => Promise<T[]>;
+  demo: T[];
+}): Promise<Result<T>> {
   try {
-    const res = await apiClient.get('/alerts/active');
-    backendReachable = true;
-    return res.data;
-  } catch {
-    await ensureSeeded();
-    return db.alerts.toArray();
+    const rows = await opts.fetch();
+    await db.transaction('rw', opts.table, db.kv, async () => {
+      await opts.clearScope();
+      await opts.table.bulkPut(rows);
+      await db.kv.put({ key: opts.kvKey, value: new Date().toISOString() });
+    });
+    return { data: rows, source: 'network' };
+  } catch (e) {
+    if (!isOfflineError(e)) throw e;                 // server answered with an error: do not mask it
+    const cached = await opts.readCache();
+    const kv = await db.kv.get(opts.kvKey);
+    if (cached.length || kv) return { data: cached, source: 'cache', cachedAt: kv?.value };
+    if (DEMO_MODE) return { data: opts.demo, source: 'demo' };
+    return { data: [], source: 'cache' };            // offline and nothing saved yet — honest empty state
   }
 }
 
-export async function getBoreholes(district?: string): Promise<Borehole[]> {
+export function getAlerts(): Promise<Result<Alert>> {
+  return readThrough<Alert>({
+    table: db.cacheAlerts, kvKey: 'cachedAt:alerts', demo: DEMO_ALERTS,
+    fetch: async () => toCamel<Alert[]>((await apiClient.get('/alerts/active')).data),
+    clearScope: () => db.cacheAlerts.clear(),
+    readCache: () => db.cacheAlerts.toArray(),
+  });
+}
+
+export function getBoreholes(district?: string): Promise<Result<Borehole>> {
+  return readThrough<Borehole>({
+    table: db.cacheBoreholes, kvKey: `cachedAt:boreholes:${district ?? 'all'}`, demo: DEMO_BOREHOLES,
+    fetch: async () => toCamel<Borehole[]>((await apiClient.get('/mvura/boreholes', { params: district ? { district } : {} })).data),
+    clearScope: () => (district ? db.cacheBoreholes.where('district').equals(district).delete() : db.cacheBoreholes.clear()),
+    readCache: () => (district ? db.cacheBoreholes.where('district').equals(district).toArray() : db.cacheBoreholes.toArray()),
+  });
+}
+
+export function getListings(type?: MarketListing['type']): Promise<Result<MarketListing>> {
+  return readThrough<MarketListing>({
+    table: db.cacheListings, kvKey: `cachedAt:listings:${type ?? 'all'}`, demo: DEMO_LISTINGS,
+    fetch: async () => toCamel<MarketListing[]>((await apiClient.get('/musika/listings', { params: type ? { type } : {} })).data),
+    clearScope: () => (type ? db.cacheListings.where('type').equals(type).delete() : db.cacheListings.clear()),
+    readCache: () => (type ? db.cacheListings.where('type').equals(type).toArray() : db.cacheListings.toArray()),
+  });
+}
+
+// ───────────────────────── writes ─────────────────────────
+export type WriteOutcome<T = unknown> = { status: 'sent'; data: T } | { status: 'queued' };
+
+async function write<T>(kind: 'borehole_report' | 'listing', path: string, body: Record<string, unknown>): Promise<WriteOutcome<T>> {
   try {
-    const res = await apiClient.get('/mvura/boreholes' + (district ? `?district=${district}` : ''));
-    backendReachable = true;
-    return res.data.boreholes || res.data;
-  } catch {
-    await ensureSeeded();
-    const all = await db.boreholes.toArray();
-    return district ? all.filter(b => b.village.includes(district)) : all;
+    const res = await apiClient.post(path, body);
+    return { status: 'sent', data: toCamel<T>(res.data) };
+  } catch (e) {
+    if (!isOfflineError(e)) throw e;                 // validation / auth / server errors go to the UI
+    await db.outbox.add({ kind, path, body, createdAt: new Date().toISOString(), status: 'pending', attempts: 0 });
+    return { status: 'queued' };
   }
 }
 
-export async function getListings(type?: MarketListing['type']): Promise<MarketListing[]> {
-  try {
-    const res = await apiClient.get('/musika/listings' + (type ? `?type=${type}` : ''));
-    backendReachable = true;
-    return res.data.listings || res.data;
-  } catch {
-    await ensureSeeded();
-    const all = await db.listings.toArray();
-    return type ? all.filter(l => l.type === type) : all;
-  }
+export interface NewListing {
+  type: MarketListing['type']; title: string; description?: string; quantity: number; unit: string;
+  priceUsd: number; district: string; /** seller agrees to show their phone number to other users */ sharePhone?: boolean;
+  expiresAt?: string;
 }
 
-export async function addListing(listing: Omit<MarketListing, 'id'>): Promise<MarketListing> {
-  try {
-    const res = await apiClient.post('/musika/listings', listing);
-    backendReachable = true;
-    return res.data;
-  } catch {
-    const withId: MarketListing = { ...listing, id: `local-${Date.now()}` };
-    await db.listings.add(withId);
-    return withId;
-  }
+export function addListing(listing: NewListing) {
+  return write<MarketListing>('listing', '/musika/listings', toSnake(listing));
 }
 
-export async function reportBorehole(update: Pick<Borehole, 'id' | 'status'> & { note?: string }) {
-  try {
-    await apiClient.post(`/mvura/boreholes/${update.id}/report`, update);
-    backendReachable = true;
-  } catch {
-    await db.boreholes.where('id').equals(update.id).modify({ status: update.status, lastVerified: new Date().toISOString() });
+export function reportBorehole(update: { id: string; status: 'working' | 'low' | 'dry' | 'broken'; note?: string }) {
+  // The API field is `new_status`. The report is stored as PENDING: validators confirm it before it changes
+  // what everyone sees.
+  return write('borehole_report', `/mvura/boreholes/${update.id}/report`, { new_status: update.status, note: update.note ?? null });
+}
+
+export async function outboxCounts(): Promise<{ pending: number; failed: number }> {
+  const [pending, failed] = await Promise.all([
+    db.outbox.where('status').equals('pending').count(), db.outbox.where('status').equals('failed').count()]);
+  return { pending, failed };
+}
+
+/** Replay queued writes oldest-first. Stops at the first network failure (still offline). */
+export async function flushOutbox(): Promise<{ sent: number; failed: number; stillOffline: boolean }> {
+  let sent = 0, failed = 0;
+  const items = await db.outbox.where('status').equals('pending').sortBy('seq');
+  for (const item of items) {
+    try {
+      await apiClient.post(item.path, item.body);
+      await db.outbox.delete(item.seq!);
+      sent++;
+    } catch (e) {
+      if (isOfflineError(e)) return { sent, failed, stillOffline: true };
+      const status = e instanceof ApiError ? e.status : undefined;
+      const message = e instanceof ApiError ? e.detail : 'Unknown error';
+      // 4xx (except auth/timeouts/rate limits) can never succeed on retry -> park it as failed, don't loop forever
+      const permanent = status !== undefined && status >= 400 && status < 500 && ![401, 408, 429].includes(status);
+      await db.outbox.update(item.seq!, { status: permanent ? 'failed' : 'pending', attempts: item.attempts + 1, lastError: message });
+      if (permanent) failed++; else return { sent, failed, stillOffline: false };
+    }
   }
+  return { sent, failed, stillOffline: false };
 }

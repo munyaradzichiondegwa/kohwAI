@@ -1,34 +1,48 @@
-"""
-USSD Menu Definitions for KohwAI
-"""
+"""USSD copy that is plain text (no data). Every screen must be <= 160 characters; this is
+enforced by tests (tests/test_ussd_screens.py) for every reachable screen."""
 
-MAIN_MENU = """CON Welcome to KohwAI *123#
-1. Zunde - Agriculture
-2. Mvura - Water
-3. Simba - Energy
-4. Musika - Marketplace
-0. Help / My Data
-99. Change Language"""
+MAX_LEN = 160
 
-_MENUS = {
+MAIN_MENU = """CON KohwAI
+1. Farming (Zunde)
+2. Water (Mvura)
+3. Solar (Simba)
+4. Market (Musika)
+5. My account
+0. Help"""
 
-    "help": """CON KohwAI Help
-1. Call Agritex: 0800-AGRITEX
-2. Request my data
-3. Report a problem
-0. Back""",
+ZUNDE_MENU = """CON Farming
+1. Recent weather
+2. Sick crop
+3. Sick animal
+4. Planting guide
+5. Report pest
+0. Back 9. Menu"""
 
-    "planting_guide": """END Planting Guide - Chipinge
-Maize: Plant Nov 15 - Dec 10
-Sorghum: Plant Oct 25 - Nov 20
-Recommended: Maize SC403
-Source: Agritex / SARCOF 2024""",
+MVURA_MENU = """CON Water
+1. Boreholes near me
+2. Report borehole
+3. Water tips
+0. Back 9. Menu"""
 
-}
+SIMBA_MENU = """CON Solar
+1. Recent sunshine
+2. Battery calculator
+3. Energy tips
+0. Back 9. Menu"""
 
+MUSIKA_MENU = """CON Market
+1. Browse
+2. Sell produce
+3. My insurance
+0. Back 9. Menu"""
 
-def get_menu(key: str) -> str:
-    return _MENUS.get(
-        key,
-        "END Menu not found. Dial *123# to restart."
-    )
+WATER_TIPS = """END Water tips
+Water crops early or late in the day. Mulch to cut evaporation. Boil drinking water 1 min if unsure it is clean."""
+
+ENERGY_TIPS = """END Energy tips
+Charge phones in daylight. Switch off unused lights. Keep panels clean and shade-free."""
+
+NOT_REGISTERED = "END Please register first: dial again, choose 5 (My account)."
+INVALID = "END Invalid choice. Dial again to restart."
+UNAVAILABLE = "END KohwAI USSD is temporarily unavailable. Please try later."

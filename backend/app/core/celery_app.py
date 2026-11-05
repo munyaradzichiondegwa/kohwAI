@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.workers.risk_model",
         "app.workers.alerts",
         "app.workers.insurance",
+        "app.workers.intelligence",
     ],
 )
 
@@ -42,6 +43,11 @@ celery_app.conf.beat_schedule = {
     "check-insurance-triggers": {
         "task": "app.workers.insurance.check_drought_payouts",
         "schedule": crontab(minute=30, hour=2),
+    },
+    # District-wide cross-pillar rules (pest outbreak clustering, rains onset)
+    "evaluate-district-rules": {
+        "task": "app.workers.intelligence.evaluate_districts",
+        "schedule": crontab(minute=15, hour="*/3"),
     },
     # Dispatch pending alerts every 5 minutes
     "dispatch-alerts": {

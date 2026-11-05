@@ -1,4 +1,5 @@
 # FastAPI router for Livestock Health
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -6,6 +7,7 @@ from app.core.database import get_db
 from app.api.v1.deps import get_current_user
 from app.models.user import User
 from app.modules.livestock import service
+from app.modules.ussd.rules_engine import LIVESTOCK_SYMPTOMS, ANIMALS
 from app.modules.livestock.schemas import (
     LivestockDiagnoseRequest, LivestockDiagnoseOut, LivestockProfileCreate, LivestockProfileOut,
 )
@@ -15,25 +17,29 @@ router = APIRouter()
 
 @router.get("/reference/symptoms", summary="Symptom options for livestock triage")
 async def symptoms():
-    return [
-        {"code": "1", "label": "Skin nodules / lumps"},
-        {"code": "2", "label": "Coughing / laboured breathing"},
-        {"code": "3", "label": "Blisters on mouth or feet"},
-        {"code": "4", "label": "Lethargy / tick infestation"},
-        {"code": "5", "label": "Sudden death / bleeding from openings"},
-    ]
+    return [{"code": c, "label": full} for c, full, _short in LIVESTOCK_SYMPTOMS]
 
 
-@router.get("/reference/animal-types", summary="Animal type options")
+@router.get("/reference/animal-types", summary="Animal types the rules currently cover")
 async def animal_types():
-    return [{"code": "1", "label": "Cattle"}, {"code": "4", "label": "Poultry"}]
+    return [{"code": c, "label": label} for c, label in ANIMALS]
 
 
 @router.post("/diagnose", response_model=LivestockDiagnoseOut, summary="Rules-based livestock symptom triage")
-async def diagnose(body: LivestockDiagnoseRequest, db: Session = Depends(get_db),
-                    user: User = Depends(get_current_user)):
-    result = service.diagnose(db, str(user.id), body.animal_type_code, body.symptom_code, body.animal_id)
-    return LivestockDiagnoseOut(id=str(user.id), **result)
+def diagnose(body: LivestockDiagnoseRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    try:
+        result = service.diagnose(db, str(user.id), body.animal_type_code, body.symptom_code,
+                                  body.animal_id, body.district or user.district)
+    except LookupError:
+        raise HTTPException(404, "Animal not found")
+    return LivestockDiagnoseOut(**result)
+
+
+@router.post("/profiles/{animal_id}/recovered", summary="Mark one of my animals as recovered")
+def recovered(animal_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not service.mark_recovered(db, str(user.id), animal_id):
+        raise HTTPException(404, "Animal not found")
+    return {"status": "healthy"}
 
 
 @router.post("/profiles", response_model=LivestockProfileOut, summary="Register an animal")

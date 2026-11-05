@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Date, Integer
+from sqlalchemy import Column, String, Float, Date, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from app.models.base import Base, UUIDMixin
 
@@ -7,6 +7,7 @@ from app.models.base import Base, UUIDMixin
 
 class SatelliteReading(Base, UUIDMixin):
     __tablename__ = "satellite_readings"
+    __table_args__ = (UniqueConstraint("district", "reading_date", "source", name="uq_reading_district_date_source"),)
     district      = Column(String(100), nullable=False, index=True)
     reading_date  = Column(Date,        nullable=False, index=True)
     source        = Column(String(50),  nullable=False)

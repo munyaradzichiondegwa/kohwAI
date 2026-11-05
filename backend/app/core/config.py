@@ -16,6 +16,23 @@ class Settings(BaseSettings):
     # Dev convenience only; honoured solely when ENVIRONMENT == "development".
     EXPOSE_DEV_OTP: bool = False
 
+    # Parametric insurance rules (see modules/musika/insurance_service.py)
+    INSURANCE_DROUGHT_THRESHOLD: int = 70        # drought_index (0-100) at/above which a day "qualifies"
+    INSURANCE_MIN_CONSECUTIVE_DAYS: int = 5      # qualifying days in a row (PRD: >5 consecutive days)
+    INSURANCE_WAITING_DAYS: int = 14             # enrol at least this long before the dry spell began
+    INSURANCE_SEASON_START_MONTH: int = 11       # season runs Nov 1 .. Mar 31 of the following year
+    INSURANCE_SEASON_END_MONTH: int = 3
+
+    # Africa's Talking does not sign USSD callbacks. Comma-separated source IPs allowed to call
+    # /ussd/callback. Outside development an empty list REJECTS all USSD traffic (otherwise anyone
+    # could POST as any phone number and file reports / listings in that farmer's name).
+    USSD_ALLOWED_IPS: str = ""
+
+    # Real helpline numbers shown to farmers in emergencies. Left blank on purpose:
+    # we never display a number nobody has verified. Set in .env once Agritex / Vet Services confirm them.
+    VET_SERVICES_CONTACT: str = ""
+    AGRITEX_CONTACT: str = ""
+
     # Database
     DATABASE_URL: str = "postgresql://kohwai:secret@localhost:5432/kohwai"
     TIMESCALE_URL: str = "postgresql://kohwai:secret@localhost:5433/kohwai_ts"

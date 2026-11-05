@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import AppShell from '@/components/layout/AppShell';
-import { apiClient } from '@/lib/api';
+import { apiClient, isOfflineError } from '@/lib/api';
+import { simulateBattery, zimbabweHourNow, TYPICAL_IRRADIANCE_KWH_M2 } from '@/lib/battery';
 import { useAuthStore } from '@/stores/authStore';
 
 export default function SimbaPage() {
@@ -13,39 +14,30 @@ export default function SimbaPage() {
   const [forecast, setForecast] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
-  // Fully offline, client-side estimate (works with zero network — matches the
-  // PRD requirement that the load calculator "must work fully offline").
-  function offlineEstimate() {
-    const points = [];
-    let batteryWh = (currentPct / 100) * capacity;
-    const dailyGenWh = panelWatts * 5.5 * 0.75; // assumes ~5.5 average sun-hours (Zimbabwe dry-season typical)
-    for (let h = 0; h <= 48; h += 6) {
-      const isDaylight = (h % 24) >= 6 && (h % 24) <= 18;
-      const genWh = isDaylight ? (dailyGenWh / 12) * 6 : 0;
-      const useWh = loadWatts * 6;
-      if (h > 0) batteryWh = Math.max(0, Math.min(capacity, batteryWh + genWh - useWh));
-      points.push({ hours_from_now: h, estimated_battery_pct: Math.round((100 * batteryWh / capacity) * 10) / 10 });
-    }
+  const [error, setError] = useState<string | null>(null);
+
+  // Fully offline, client-side estimate (the PRD requires the load calculator to work with zero network).
+  // Uses the same energy model as the server (lib/battery.ts mirrors backend simba/service.py).
+  function offlineEstimate(reason: string) {
     setForecast({
       district: user?.district || 'your area', battery_capacity_wh: capacity, panel_watts: panelWatts,
-      data_source: 'Offline estimate (typical dry-season sun-hours) — reconnect for live satellite data',
-      forecast: points,
+      data_source: `Offline estimate using typical sunshine (${TYPICAL_IRRADIANCE_KWH_M2} kWh/m²/day) — ${reason}`,
+      forecast: simulateBattery(capacity, panelWatts, currentPct, loadWatts, TYPICAL_IRRADIANCE_KWH_M2, zimbabweHourNow()),
       disclaimer: 'Simplified energy-balance estimate, not a professional solar sizing calculation.',
     });
   }
 
   async function runForecast() {
-    setLoading(true);
+    setLoading(true); setError(null);
+    if (!user?.district) { offlineEstimate('set your district in your profile for live satellite data'); setLoading(false); return; }
     try {
       const res = await apiClient.get('/simba/battery-forecast', {
-        params: {
-          district: user?.district || 'Harare', battery_capacity_wh: capacity,
-          panel_watts: panelWatts, current_pct: currentPct, load_watts: loadWatts,
-        },
+        params: { district: user.district, battery_capacity_wh: capacity, panel_watts: panelWatts, current_pct: currentPct, load_watts: loadWatts },
       });
       setForecast(res.data);
-    } catch {
-      offlineEstimate();
+    } catch (e: any) {
+      if (isOfflineError(e)) offlineEstimate('reconnect for live satellite data');
+      else setError(e?.detail || 'Could not calculate the forecast.');
     } finally {
       setLoading(false);
     }
@@ -55,7 +47,7 @@ export default function SimbaPage() {
     <AppShell title="Simba — Energy">
       <section className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">☀️ Battery &amp; solar forecast</h1>
-        <p className="text-sm text-gray-500 mt-1">48-hour estimate. Works fully offline using typical sun-hours.</p>
+        <p className="text-sm text-gray-500 mt-1">48-hour estimate. Works offline using typical sunshine; online it uses live satellite data.</p>
       </section>
 
       <section className="bg-white rounded-2xl border border-gray-100 p-4 mb-6">
@@ -87,6 +79,7 @@ export default function SimbaPage() {
         </button>
       </section>
 
+      {error && <p className="text-sm text-brand-red mb-3">{error}</p>}
       {forecast && (
         <section className="bg-white rounded-2xl border border-gray-100 p-4">
           <h2 className="font-semibold text-gray-800 mb-3">Estimated battery charge</h2>

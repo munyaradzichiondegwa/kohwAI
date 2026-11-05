@@ -13,11 +13,8 @@ const SEVERITY_CLASSES: Record<string, string> = {
 };
 
 export default function AlertCarousel() {
-  const { data: alerts = [] } = useSWR<Alert[]>(
-    'active-alerts',
-    () => getAlerts(),
-    { refreshInterval: 60_000 },
-  );
+  const { data: result } = useSWR('active-alerts', () => getAlerts(), { refreshInterval: 60_000 });
+  const alerts: Alert[] = result?.data ?? [];
   const [idx, setIdx] = useState(0);
   if (!alerts.length) return null;
 
@@ -28,7 +25,11 @@ export default function AlertCarousel() {
         <div>
           <p className="font-semibold text-base">{alert.title}</p>
           <p className="text-sm opacity-90 mt-1">{alert.body}</p>
-          <p className="text-xs opacity-70 mt-2">{alert.district} · {new Date(alert.createdAt).toLocaleDateString()}</p>
+          <p className="text-xs opacity-70 mt-2">
+            {alert.district} · {new Date(alert.createdAt).toLocaleDateString()}
+            {result?.source === 'cache' && ' · saved copy (offline)'}
+            {result?.source === 'demo' && ' · DEMO DATA'}
+          </p>
         </div>
         {alerts.length > 1 && (
           <div className="flex gap-1 ml-3">

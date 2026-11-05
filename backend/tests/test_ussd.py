@@ -1,38 +1,236 @@
-"""Tests for USSD handler."""
+"""USSD: real data only, <=160 chars on every reachable screen, navigation, registration, writes."""
+import collections
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
+
+from app.core.config import settings
+from app.models.mvura import Borehole, BoreholeReport
+from app.models.musika import MarketListing
+from app.models.satellite import SatelliteReading
+from app.models.user import User
+from app.models.zunde import PestSighting
+from app.modules.ussd.handler import USSDHandler, resolve
+from app.modules.ussd.menus import MAX_LEN
+from tests.conftest import make_user
+
+H = USSDHandler()
 
 
-
-async def test_main_menu(client):
-    if True:
-        resp = await client.post("/api/v1/ussd/callback", data={
-            "sessionId": "test-session-1",
-            "serviceCode": "*123#",
-            "phoneNumber": "+263771234567",
-            "text": "",
-        })
-    assert resp.status_code == 200
-    assert "CON Welcome to KohwAI" in resp.text
+def fresh_phone() -> str:
+    import uuid
+    return f"+2637{uuid.uuid4().int % 10**8:08d}"
+FAKE_MARKERS = ["Masvingo Village Well", "Chipinge  Mon", "42/100", "0800-", "Coming soon", "6.2 kWh", "Source: Agritex / SARCOF"]
 
 
-async def test_zunde_menu(client):
-    if True:
-        resp = await client.post("/api/v1/ussd/callback", data={
-            "sessionId": "test-session-2",
-            "serviceCode": "*123#",
-            "phoneNumber": "+263771234567",
-            "text": "1",
-        })
-    assert "Zunde" in resp.text
+def ask(db, phone, *inputs):
+    return H.route(db, phone, resolve(list(inputs)))
 
 
-async def test_crop_triage_result(client):
-    """Symptom: yellow leaves (1) + Maize (1) → disease + disclaimer."""
-    if True:
-        resp = await client.post("/api/v1/ussd/callback", data={
-            "sessionId": "test-session-3",
-            "serviceCode": "*123#",
-            "phoneNumber": "+263771234567",
-            "text": "1*2*1*1",
-        })
-    assert "END" in resp.text
-    assert "symptom guide" in resp.text.lower()
+async def post(client, text, phone="+263771234567"):
+    return await client.post("/api/v1/ussd/callback", data={"sessionId": "s", "serviceCode": "*123#", "phoneNumber": phone, "text": text})
+
+
+def seed(db, district="Chipinge"):
+    today = date.today()
+    for i in range(6):
+        db.add(SatelliteReading(district=district, reading_date=today - timedelta(days=i), source="nasa_power",
+                                rainfall_mm=6.0 - i, temp_max_c=30.5, solar_kwh_m2=5.5, drought_index=40))
+    db.add(Borehole(name="Mutema Primary School Community Borehole", village="Mutema", district=district, status="working",
+                    last_verified=datetime.now(timezone.utc)))
+    db.add(Borehole(name="Dry Gulley Borehole", village="V", district=district, status="dry"))
+    seller = make_user(db, district)
+    db.add(MarketListing(seller_id=seller.id, type="seed", title="SC403 certified maize seed", quantity=40, unit="kg",
+                         price_usd=1.8, district=district, is_active=True, share_phone=True,
+                         expires_at=datetime.now(timezone.utc) + timedelta(days=5)))
+    db.commit()
+
+
+# ───────── protocol / navigation ─────────
+def test_resolve_navigation():
+    assert resolve(["1", "2", "0"]) == ["1"]
+    assert resolve(["1", "2", "9"]) == []
+    assert resolve(["1", "2", "9", "3"]) == ["3"]
+    assert resolve(["0"]) == ["0"]                 # root-level 0 = Help
+    assert resolve(["1", "0", "0"]) == ["0"]
+
+
+async def test_callback_main_menu_and_back(client):
+    r = await post(client, "")
+    assert r.status_code == 200 and r.text.startswith("CON KohwAI") and "Farming" in r.text
+    back = await post(client, "1*0")
+    assert back.text == r.text                       # 0 returns to the main menu
+    menu = await post(client, "2*1*9")
+    assert menu.text == r.text                       # 9 always returns to main menu
+
+
+async def test_callback_help_uses_configured_contacts_only(client, monkeypatch):
+    r = await post(client, "0")
+    assert r.text.startswith("END") and "nearest Veterinary office" in r.text and "0800" not in r.text
+    monkeypatch.setattr(settings, "VET_SERVICES_CONTACT", "0242-700000")
+    assert "0242-700000" in (await post(client, "0")).text
+
+
+async def test_ussd_gateway_flag_off_and_ip_allowlist(client, db, monkeypatch):
+    # production-like: empty allowlist rejects everything (fail closed)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    assert (await post(client, "")).status_code == 403
+    monkeypatch.setattr(settings, "USSD_ALLOWED_IPS", "203.0.113.9")
+    assert (await post(client, "")).status_code == 403          # test client's IP is not on the list
+    monkeypatch.setattr(settings, "USSD_ALLOWED_IPS", "127.0.0.1,testclient")
+    assert (await post(client, "")).status_code == 200
+
+
+# ───────── real data, no fakes ─────────
+def test_weather_planting_solar_come_from_stored_readings(db, clean):
+    seed(db)
+    u = make_user(db, "Chipinge")
+    w = ask(db, u.phone, "1", "1")
+    assert w.startswith("END") and "Chipinge" in w and "6.0mm" in w and "Observed, not a forecast" in w
+    p = ask(db, u.phone, "1", "4")
+    assert "Rain, last 5 days: 20mm" in p and "Rain still light" in p                # 6+5+4+3+2 = 20 < 25
+    s = ask(db, u.phone, "3", "1")
+    assert "5.5 kWh/m2/day" in s
+
+
+def test_no_data_says_so_instead_of_inventing(db, clean):
+    u = make_user(db, "Binga")
+    assert "No satellite data stored yet" in ask(db, u.phone, "1", "1")
+    assert "Not enough recent rain data" in ask(db, u.phone, "1", "4")
+    assert "No solar data stored yet" in ask(db, u.phone, "3", "1")
+    assert "None registered yet" in ask(db, u.phone, "2", "1")
+    assert "No seed listings" in ask(db, u.phone, "4", "1", "1")
+
+
+def test_boreholes_screen_shows_real_names_and_verification(db, clean):
+    seed(db); u = make_user(db, "Chipinge")
+    out = ask(db, u.phone, "2", "1")
+    assert "Mutema Primary S: working" in out and "Dry Gulley Boreh: dry (unverified)" in out
+    assert out.index("working") < out.index("dry")                         # best status first
+
+
+def test_browse_shows_phone_only_when_seller_opted_in(db, clean):
+    seed(db); u = make_user(db, "Chipinge")
+    assert "SC403 certifie 40kg $1.8 07" in ask(db, u.phone, "4", "1", "1")
+    db.query(MarketListing).update({"share_phone": False}); db.commit()
+    out = ask(db, u.phone, "4", "1", "1")
+    assert "SC403" in out and "$1.8 07" not in out
+
+
+def test_diagnosis_screens_are_honest_and_short(db):
+    u = "+263771110000"
+    assert "Maize Streak Virus" in ask(db, u, "1", "2", "1", "1") and "Guide only" in ask(db, u, "1", "2", "1", "1")
+    assert "No guidance yet" in ask(db, u, "1", "2", "3", "2")             # sorghum + chewed leaves: no rule -> say so
+    assert "No crop guide yet" in ask(db, u, "1", "2", "1", "3")
+    fmd = ask(db, u, "1", "3", "3", "1")
+    assert "Foot and Mouth" in fmd and "REPORTABLE" in fmd and "Report to your nearest Veterinary office NOW" in fmd
+    assert "No guide for this animal yet" in ask(db, u, "1", "3", "1", "3")
+    assert "Nitrogen" in ask(db, u, "1", "2", "1", "1")
+
+
+def test_battery_calculator_uses_real_energy_model(db, clean):
+    seed(db); u = make_user(db, "Chipinge")
+    out = ask(db, u.phone, "3", "2", "1000", "10000", "5", "1")
+    # 1000W * 5.5 kWh/m2 * 0.75 = 4125 Wh/day; +41.25% - 0.24% (1W load) + 5% start = ~46% after any 24h, whatever the clock
+    assert "Battery now 5%" in out and "In 24h: ~46%" in out and "live sun data" in out
+    assert "Invalid number" in ask(db, u.phone, "3", "2", "1000", "10000", "150", "1")
+    assert "Invalid number" in ask(db, u.phone, "3", "2", "abc")
+    assert ask(db, u.phone, "3", "2").startswith("CON Solar panel watts?")
+
+
+# ───────── registration & writes ─────────
+def test_registration_requires_consent_and_stores_it(db):
+    phone = fresh_phone()
+    assert "accept the KohwAI Terms" in ask(db, phone, "5")
+    assert ask(db, phone, "5", "2") == "END Invalid choice. Dial again to restart."
+    page1 = ask(db, phone, "5", "1")
+    assert "1. Chipinge" in page1 and "8. More" in page1 and "9." not in page1          # '9' is reserved for Menu
+    page2 = ask(db, phone, "5", "1", "8")
+    assert "1. Mutare" in page2 and "3. Masvingo" in page2 and "Chipinge" not in page2
+    done = ask(db, phone, "5", "1", "8", "3")
+    assert "Registered in Masvingo" in done
+    u = db.query(User).filter_by(phone=phone).one()
+    assert u.terms_accepted_at is not None and u.roles == ["farmer"] and u.district == "Masvingo"
+    assert "Registered: Masvingo" in ask(db, phone, "5")             # now recognised
+
+
+def test_writes_require_registration(db):
+    p = fresh_phone()
+    for path in (("1", "5"), ("2", "2"), ("4", "2"), ("4", "3")):
+        assert "register first" in ask(db, p, *path), path
+
+
+def test_pest_report_creates_pending_sighting(db, clean):
+    u = make_user(db, "Chipinge")
+    out = ask(db, u.phone, "1", "5", "1", "3")
+    assert out.startswith("END Thank you")
+    s = db.query(PestSighting).one()
+    assert s.species == "Fall Armyworm" and s.severity == "high" and s.status == "pending" and s.district == "Chipinge"
+    assert ask(db, u.phone, "1", "5", "9x") == "END Invalid choice. Dial again to restart."
+
+
+def test_borehole_report_is_pending_and_updates_not_stacks(db, clean):
+    seed(db); u = make_user(db, "Chipinge")
+    assert ask(db, u.phone, "2", "2", "1", "3").startswith("END Thank you")
+    ask(db, u.phone, "2", "2", "1", "4")
+    reports = db.query(BoreholeReport).all()
+    assert len(reports) == 1 and reports[0].status == "pending" and reports[0].new_status == "broken"
+    assert db.query(Borehole).filter_by(name="Mutema Primary School Community Borehole").one().status == "working"
+
+
+def test_sell_flow_creates_a_validated_listing(db, clean):
+    u = make_user(db, "Chipinge")
+    assert ask(db, u.phone, "4", "2", "2", "Maize <script>", "1", "50", "0.3").startswith("CON Maize script 50kg $0.3")
+    out = ask(db, u.phone, "4", "2", "2", "Maize <script>", "1", "50", "0.3", "2")
+    assert out.startswith("END Listed!")
+    m = db.query(MarketListing).one()
+    assert m.title == "Maize script" and float(m.quantity) == 50 and m.share_phone is False and m.expires_at > datetime.now(timezone.utc)
+    assert "Invalid number" in ask(db, u.phone, "4", "2", "2", "Maize", "1", "-5")
+    assert "Invalid price" in ask(db, u.phone, "4", "2", "2", "Maize", "1", "5", "abc")
+
+
+def test_insurance_screen_reflects_flag_and_real_enrolment(db, clean):
+    from app.modules.settings_module.service import upsert_setting
+    u = make_user(db, "Chipinge")
+    assert "open yet" in ask(db, u.phone, "4", "3")                      # flag OFF by default
+    upsert_setting(db, "feature_flags", {"musika_insurance_enrollment": True, "ussd_gateway": True,
+                                         "livestock_ai_photo_diagnosis": False}, None, str(u.id))
+    try:
+        assert "not enrolled" in ask(db, u.phone, "4", "3")
+        from app.modules.musika.insurance_service import enroll
+        enroll(db, str(u.id), "Chipinge", "2099-00", None, today=date(2099, 1, 5))
+        out = ask(db, u.phone, "4", "3")
+        assert "Cover 2099-00 Chipinge" in out and "No satellite data yet" in out
+    finally:
+        upsert_setting(db, "feature_flags", {"musika_insurance_enrollment": False, "ussd_gateway": True,
+                                             "livestock_ai_photo_diagnosis": False}, None, str(u.id))
+
+
+# ───────── exhaustive: every reachable screen <=160 chars and fake-free ─────────
+@pytest.mark.parametrize("district", ["Bulawayo", "Masvingo", "Chipinge"])
+def test_every_reachable_screen_fits_160_chars(db, clean, monkeypatch, district):
+    monkeypatch.setattr(settings, "VET_SERVICES_CONTACT", "0242 700 000 (24h)")      # long real-looking number
+    monkeypatch.setattr(settings, "AGRITEX_CONTACT", "0242 111 222")
+    seed(db, district)
+    from app.modules.settings_module.service import upsert_setting
+    registered = make_user(db, district)
+    unregistered = "+263774445555"
+    inputs = ["1", "2", "3", "4", "5", "6", "7", "8", "Maize grain", "50", "2.5", "1000", "10000", "80"]
+    seen_screens, over, fakes, calls = set(), [], [], 0
+    for phone in (registered.phone, unregistered):
+        queue = collections.deque([[]])
+        while queue and calls < 6000:
+            path = queue.popleft()
+            screen = H.route(db, phone, path); calls += 1
+            if len(screen) > MAX_LEN: over.append((len(screen), path, screen))
+            if any(f in screen for f in FAKE_MARKERS): fakes.append((path, screen))
+            if screen in seen_screens or not screen.startswith("CON") or len(path) >= 9:
+                continue
+            seen_screens.add(screen)
+            for i in inputs:
+                queue.append(path + [i])
+        db.rollback()
+    assert not over, over[:3]
+    assert not fakes, fakes[:3]
+    assert len(seen_screens) > 40 and calls > 200                          # the walk really covered the tree
+    db.query(User).filter(User.phone == unregistered).delete(); db.commit()

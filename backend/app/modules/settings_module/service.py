@@ -17,11 +17,20 @@ DEFAULTS = {
 
 
 def _ensure_defaults(db: Session):
+    # ON CONFLICT DO NOTHING: two concurrent first requests must not race into a unique violation.
+    from sqlalchemy.dialects.postgresql import insert
     existing = {s.key for s in db.query(PlatformSetting.key).all()}
-    for key, value in DEFAULTS.items():
-        if key not in existing:
-            db.add(PlatformSetting(key=key, value=value))
-    db.commit()
+    missing = [{"key": k, "value": v} for k, v in DEFAULTS.items() if k not in existing]
+    if missing:
+        db.execute(insert(PlatformSetting).values(missing).on_conflict_do_nothing(index_elements=["key"]))
+        db.commit()
+
+
+def flag_enabled(db: Session, name: str) -> bool:
+    """Read a feature flag (defaults apply when unset). Unknown flags are OFF."""
+    row = get_setting(db, "feature_flags")
+    flags = (row.value if row else None) or DEFAULTS["feature_flags"]
+    return bool(flags.get(name, False))
 
 
 def list_settings(db: Session) -> list[PlatformSetting]:

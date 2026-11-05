@@ -14,6 +14,8 @@ class User(Base, UUIDMixin, TimestampMixin):
     fcm_token      = Column(String(512), nullable=True)
     ussd_language  = Column(String(5),   default="en")
     data_export_requested_at = Column(DateTime(timezone=True), nullable=True)
+    # When the person accepted the Terms & Privacy Policy (PRD: explicit consent at registration).
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     diagnoses = relationship("DiagnosisReport", back_populates="user")
     livestock  = relationship("LivestockProfile",  back_populates="owner")
     listings   = relationship("MarketListing",     back_populates="seller")

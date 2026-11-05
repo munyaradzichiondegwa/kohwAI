@@ -7,7 +7,11 @@ logger = logging.getLogger(__name__)
 
 
 def send_sms(recipients: list[str], message: str) -> bool:
-    """Send SMS via Africa's Talking API. Returns True if accepted."""
+    """Send SMS via Africa's Talking API. Returns True if accepted.
+    Without credentials (local dev/tests) nothing is sent and False is returned."""
+    if not settings.AT_API_KEY:
+        logger.info("SMS skipped (no AT_API_KEY configured): to=%s", recipients)
+        return False
     try:
         resp = requests.post(
             "https://api.africastalking.com/version1/messaging",

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.zunde import DiagnosisReport, PestSighting, AdvisoryCard
 from app.modules.ussd.rules_engine import RulesEngine
-from app.utils.satellite import fetch_nasa_power, DISTRICTS
+from app.utils.satellite import fetch_nasa_power, require_district
 from app.utils.risk import compute_drought_index
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,8 @@ def diagnose_crop(db: Session, user_id: Optional[str], crop_type_code: str, symp
         crop_type=crop_type_code,
         district=district,
         top_disease=result["disease1"],
-        top3_json={"disease1": result["disease1"], "disease2": result["disease2"], "action": result["action"]},
+        top3_json={"disease1": result["disease1"], "disease2": result["disease2"], "action": result["action"],
+                   "known": result["known"]},
         image_s3_key=image_s3_key,
         synced=True,
     )
@@ -59,13 +60,14 @@ def get_planting_calendar(district: str) -> dict:
     """Fetch real NASA POWER rainfall data for the district and apply a
     disclosed, simplified onset-of-rains heuristic. Returns raw data either way
     so the farmer (or a future smarter model) isn't limited to our heuristic."""
-    if district not in DISTRICTS:
-        district = "Harare"
+    require_district(district)          # unknown district -> ValueError (router: 422), never "Harare"
 
     weather = fetch_nasa_power(district, days_back=9)
     recent = []
     cumulative_5day = None
     onset = False
+    latest_date = None
+    stale = False
 
     if weather:
         rainfall = weather.get("PRECTOTCORR", {})
@@ -78,8 +80,15 @@ def get_planting_calendar(district: str) -> dict:
                 "rainfall_mm": val if val is not None and val >= 0 else None,
                 "temp_c": temp.get(d),
             })
-        last5 = [r["rainfall_mm"] for r in recent[-5:] if r["rainfall_mm"] is not None]
-        if last5:
+        # NASA publishes with a lag and the series has had fill values removed, so "the last 5
+        # entries" are the last 5 days that actually HAVE data (not necessarily the last 5 calendar days).
+        with_data = [r for r in recent if r["rainfall_mm"] is not None]
+        last5 = [r["rainfall_mm"] for r in with_data[-5:]]
+        if with_data:
+            latest_date = with_data[-1]["date"]
+            age = (datetime.now(timezone.utc).date() - datetime.strptime(latest_date, "%Y%m%d").date()).days
+            stale = age > 5
+        if last5 and not stale:
             cumulative_5day = round(sum(last5), 1)
             onset = cumulative_5day >= ONSET_5DAY_THRESHOLD_MM
 
@@ -92,6 +101,9 @@ def get_planting_calendar(district: str) -> dict:
         (f" ({cumulative_5day}mm)" if cumulative_5day is not None else " (no recent satellite data available)") +
         ". Holding off on planting reduces the risk of a false start and having to replant."
     )
+    if weather and stale:
+        guidance = (f"The newest satellite rainfall for {district} is from {latest_date}, which is too old to judge "
+                    "whether the rains have started. Check again later or ask your local Agritex officer.")
     if not weather:
         guidance = ("Live satellite rainfall data could not be retrieved right now "
                     "(NASA POWER may be unreachable or rate-limited). Check again shortly, "
@@ -104,6 +116,8 @@ def get_planting_calendar(district: str) -> dict:
         "cumulative_5day_mm": cumulative_5day,
         "rains_likely_onset": onset,
         "guidance": guidance,
+        "latest_data_date": latest_date,
+        "data_is_stale": stale,
         "disclaimer": (
             "This is an automated estimate from satellite rainfall data using a simple "
             "5-day cumulative-rainfall threshold, not an official Agritex planting-date "
