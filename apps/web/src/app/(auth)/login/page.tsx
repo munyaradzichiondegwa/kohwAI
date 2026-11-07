@@ -1,19 +1,23 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api';
+import { toCamel } from '@/lib/case';
 import { useAuthStore } from '@/stores/authStore';
+import ConsentSummary from '@/components/ui/ConsentSummary';
 
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore(s => s.setAuth);
   const [phone, setPhone] = useState('');
-  const [otp, setOtp]     = useState('');
-  const [step, setStep]   = useState<'phone' | 'otp'>('phone');
+  const [otp, setOtp] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState('');
-
-  const [offlineNotice, setOfflineNotice] = useState(false);
+  const [error, setError] = useState('');
+  // Shown only when the server says this number has no account yet: creating one needs explicit consent.
+  const [needsTerms, setNeedsTerms] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   async function requestOtp() {
     setLoading(true); setError('');
@@ -21,29 +25,23 @@ export default function LoginPage() {
       await apiClient.post('/auth/otp/request', { phone });
       setStep('otp');
     } catch (e: any) {
-      // No backend reachable — fall back to local offline mode rather than
-      // dead-ending the user. This is clearly surfaced in the UI, not hidden.
-      setOfflineNotice(true);
-      setStep('otp');
+      // Say what actually went wrong (bad number, too many requests, no connection) — never pretend to be "offline".
+      setError(e?.offline ? 'You need a connection to sign in. After you have signed in once, KohwAI works offline.' : (e?.detail || 'Could not send the code.'));
     } finally { setLoading(false); }
   }
 
   async function verifyOtp() {
     setLoading(true); setError('');
     try {
-      const res = await apiClient.post('/auth/otp/verify', { phone, otp });
-      setAuth(res.data.access_token, res.data.refresh_token, res.data.user);
-      router.push('/dashboard');
+      const res = await apiClient.post('/auth/otp/verify', { phone, otp, accept_terms: accepted });
+      setAuth(res.data.access_token, res.data.refresh_token, toCamel(res.data.user));
+      router.push(res.data.user.needs_consent ? '/consent' : '/dashboard');
     } catch (e: any) {
-      if (offlineNotice || !navigator.onLine) {
-        // Create a local-only session so the app is usable without a backend.
-        setAuth(`local-${Date.now()}`, '', {
-          id: `local-${phone}`, phone, language: 'en', district: 'Chipinge',
-          roles: ['farmer'], createdAt: new Date().toISOString(),
-        });
-        router.push('/dashboard');
+      if (e?.status === 400 && /accept the Terms/i.test(e?.detail || '')) {
+        setNeedsTerms(true);        // new number: the same code still works once the box is ticked
+        setError('');
       } else {
-        setError(e?.message || 'Invalid OTP');
+        setError(e?.offline ? 'No connection. Please try again when you have signal.' : (e?.detail || 'Invalid code.'));
       }
     } finally { setLoading(false); }
   }
@@ -56,44 +54,38 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-brand-green mt-2">KohwAI</h1>
           <p className="text-sm text-gray-500">Climate Resilience Super-App</p>
         </div>
-        {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-        {offlineNotice && step === 'otp' && (
-          <p className="text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 mb-4">
-            No backend connection found. Continuing in offline mode — enter any 6 digits to proceed with a local session.
-          </p>
-        )}
+        {error && <p className="text-red-600 text-sm mb-4 bg-red-50 rounded-lg p-2">{error}</p>}
         {step === 'phone' ? (
           <>
             <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-            <input
-              type="tel" placeholder="+263 7X XXX XXXX"
-              value={phone} onChange={e => setPhone(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-green"
-            />
-            <button
-              onClick={requestOtp} disabled={loading || !phone}
-              className="w-full bg-brand-green text-white rounded-lg py-2 font-medium disabled:opacity-50"
-            >
-              {loading ? 'Sending...' : 'Send OTP'}
+            <input type="tel" placeholder="+263 7X XXX XXXX" value={phone} onChange={e => setPhone(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-green" />
+            <button onClick={requestOtp} disabled={loading || !phone}
+              className="w-full bg-brand-green text-white rounded-lg py-2 font-medium disabled:opacity-50">
+              {loading ? 'Sending...' : 'Send code'}
             </button>
+            <p className="text-center text-sm text-gray-500 mt-4">New here? <Link href="/register" className="text-brand-green font-medium">Create an account</Link></p>
           </>
         ) : (
           <>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Enter OTP</label>
-            <input
-              type="text" placeholder="6-digit code" maxLength={6}
-              value={otp} onChange={e => setOtp(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-green"
-            />
-            <button
-              onClick={verifyOtp} disabled={loading || otp.length < 6}
-              className="w-full bg-brand-green text-white rounded-lg py-2 font-medium disabled:opacity-50"
-            >
-              {loading ? 'Verifying...' : 'Verify & Log In'}
+            <label className="block text-sm font-medium text-gray-700 mb-1">Enter the 6-digit code</label>
+            <input type="text" inputMode="numeric" placeholder="6-digit code" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-brand-green" />
+            {needsTerms && (
+              <div className="mb-4 space-y-2">
+                <p className="text-sm text-gray-700">This number has no account yet. To create one, please accept the Terms and Privacy Policy.</p>
+                <ConsentSummary />
+                <label className="flex items-start gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} className="mt-1" />
+                  I accept the Terms and Privacy Policy
+                </label>
+              </div>
+            )}
+            <button onClick={verifyOtp} disabled={loading || otp.length < 6 || (needsTerms && !accepted)}
+              className="w-full bg-brand-green text-white rounded-lg py-2 font-medium disabled:opacity-50">
+              {loading ? 'Verifying...' : needsTerms ? 'Create account' : 'Verify & Log In'}
             </button>
-            <button onClick={() => setStep('phone')} className="w-full text-sm text-gray-500 mt-2">
-              ← Change number
-            </button>
+            <button onClick={() => { setStep('phone'); setNeedsTerms(false); setAccepted(false); }} className="w-full text-sm text-gray-500 mt-2">← Change number</button>
           </>
         )}
       </div>

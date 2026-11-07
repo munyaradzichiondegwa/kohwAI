@@ -29,6 +29,9 @@ from app.models.satellite import SatelliteReading
 from app.models.user import User
 from app.models.zunde import PestSighting
 from app.modules.identity.schemas import normalise_phone
+from app.modules.identity import pin as pinlib
+from app.modules.identity.pin import PinResult
+from app.core.config import settings
 from app.modules.musika import insurance_service
 from app.modules.musika.schemas import DEFAULT_LISTING_DAYS
 from app.modules.settings_module.service import flag_enabled
@@ -176,6 +179,33 @@ class USSDHandler:
             return end("KohwAI help", f"Crops: {agritex_contact()}", f"Animals: {vet_contact()}")
         return menus.INVALID
 
+    # ── PIN gate ─────────────────────────────────────────────────────────
+    def _pin_gate(self, db, user, args):
+        """Personal data and every write need the caller's PIN, entered as the first input of that flow.
+        -> (remaining_args, screen). If `screen` is not None, return it to the caller as-is.
+        A PIN-less account (e.g. registered in the web app) creates one here, then the session ends: the cumulative
+        USSD text would otherwise mix 'create' tokens with 'verify' tokens on the next request."""
+        if not user.pin_hash:
+            if not args:
+                return args, con("Create a 4-digit PIN", "to protect your account:")
+            if len(args) < 2:
+                return args, con("Confirm your PIN:")
+            if args[0] != args[1]:
+                return args, end("PINs did not match.", "Please dial again.")
+            try:
+                pinlib.set_pin(db, user, args[0], actor_note="ussd")
+            except ValueError as e:
+                return args, end(str(e), "Dial again.")
+            return args, end("PIN saved.", "Dial again and use it.")
+        if not args:
+            return args, con("Enter your PIN:")
+        result, left = pinlib.check_pin(db, user.id, args[0])
+        if result == PinResult.OK:
+            return args[1:], None
+        if result == PinResult.LOCKED:
+            return args, end("Too many wrong PINs.", f"Locked for {settings.PIN_LOCK_MINUTES} min.")
+        return args, end("Wrong PIN.", f"{left} tries left. Dial again.")
+
     # ── Zunde ────────────────────────────────────────────────────────────
     def _zunde(self, db, user, phone, sub):
         if not sub:
@@ -254,6 +284,9 @@ class USSDHandler:
     def _pest_report(self, db, user, args):
         if not user or user.district not in DISTRICTS:
             return menus.NOT_REGISTERED
+        args, screen = self._pin_gate(db, user, args)
+        if screen:
+            return screen
         if not args:
             return con("Which pest?", *[f"{i}. {p.split(' (')[0]}" for i, p in enumerate(USSD_PESTS, 1)], "0. Back")
         if not (args[0].isdigit() and 1 <= int(args[0]) <= len(USSD_PESTS)):
@@ -288,6 +321,9 @@ class USSDHandler:
         if sel == "2":
             if not user or user.district not in DISTRICTS:
                 return menus.NOT_REGISTERED
+            rest, screen = self._pin_gate(db, user, rest)
+            if screen:
+                return screen
             bhs = self._district_boreholes(db, user.district)[:7]
             if not bhs:
                 return end("No boreholes registered", "in your district yet.")
@@ -378,7 +414,7 @@ class USSDHandler:
         if sel == "2":
             return self._sell(db, user, rest)
         if sel == "3":
-            return self._insurance(db, user)
+            return self._insurance(db, user, rest)
         return menus.INVALID
 
     def _browse(self, db, user, args):
@@ -411,6 +447,9 @@ class USSDHandler:
     def _sell(self, db, user, args):
         if not user or user.district not in DISTRICTS:
             return menus.NOT_REGISTERED
+        args, screen = self._pin_gate(db, user, args)
+        if screen:
+            return screen
         steps = len(args)
         if steps == 0:
             return con("Sell:", "1. Seeds", "2. Produce", "0. Back")
@@ -450,11 +489,14 @@ class USSDHandler:
         db.commit()
         return end("Listed! Visible to buyers", f"in {user.district} for {DEFAULT_LISTING_DAYS} days.")
 
-    def _insurance(self, db, user):
+    def _insurance(self, db, user, args):
         if not user:
             return menus.NOT_REGISTERED
         if not flag_enabled(db, "musika_insurance_enrollment"):
             return end("Drought cover is not", "open yet. We will tell you.")
+        _rest, screen = self._pin_gate(db, user, args)     # insurance details are personal and financial
+        if screen:
+            return screen
         e = insurance_service.get_my_enrollment(db, str(user.id))
         if not e:
             return end("You are not enrolled.", "Enrol in the KohwAI app.")
@@ -472,9 +514,14 @@ class USSDHandler:
     def _account(self, db, user, phone, sub):
         if user:
             if not sub:
-                return con(f"Registered: {user.district or 'no district'}", "1. Change district", "0. Back")
-            if sub[0] == "1":
-                d, _used, screen = _district_step(sub[1:])
+                return con(f"Registered: {user.district or 'no district'}", f"SMS alerts: {'ON' if user.sms_alerts else 'OFF'}",
+                           "1. Change district", "2. SMS alerts on/off", "3. Change PIN", "0. Back")
+            sel, rest = sub[0], sub[1:]
+            rest, screen = self._pin_gate(db, user, rest)
+            if screen:
+                return screen
+            if sel == "1":
+                d, _used, screen = _district_step(rest)
                 if d is None:
                     return screen
                 before = user.district
@@ -482,21 +529,51 @@ class USSDHandler:
                 db.commit()
                 write_audit_log(db, str(user.id), "ussd.change_district", "user", str(user.id), before=before, after=d)
                 return end(f"District set to {d}.")
+            if sel == "2":
+                if not rest:
+                    return con("SMS alerts for your district:", "1. Turn ON", "2. Turn OFF", "0. Back")
+                if rest[0] not in ("1", "2"):
+                    return menus.INVALID
+                user.sms_alerts = rest[0] == "1"
+                db.commit()
+                write_audit_log(db, str(user.id), "ussd.sms_alerts", "user", str(user.id), after=user.sms_alerts)
+                return end("SMS alerts are now", "ON." if user.sms_alerts else "OFF.")
+            if sel == "3":
+                if not rest:
+                    return con("New 4-digit PIN:")
+                if len(rest) < 2:
+                    return con("Confirm new PIN:")
+                if rest[0] != rest[1]:
+                    return end("PINs did not match.", "Please dial again.")
+                try:
+                    pinlib.set_pin(db, user, rest[0], actor_note="ussd")
+                except ValueError as e:
+                    return end(str(e), "Dial again.")
+                return end("PIN changed.")
             return menus.INVALID
-        # not registered: consent first, then district
+        # not registered: consent -> district -> PIN
         if not sub:
-            return con("Register free. By joining you", "accept the KohwAI Terms and", "Privacy Policy.", "1. I accept", "0. Back")
+            return con("Register free. By joining you", "accept the KohwAI Terms and", "Privacy Policy and get SMS", "alerts for your district.", "1. I accept", "0. Back")
         if sub[0] != "1":
             return menus.INVALID
-        d, _used, screen = _district_step(sub[1:])
+        d, used, screen = _district_step(sub[1:])
         if d is None:
             return screen
+        pins = sub[1 + used:]
+        if not pins:
+            return con("Create a 4-digit PIN", "to protect your account:")
+        if len(pins) < 2:
+            return con("Confirm your PIN:")
+        if pins[0] != pins[1]:
+            return end("PINs did not match.", "Please dial again.")
         try:
             p = normalise_phone(phone.replace(" ", ""))
-        except ValueError:
-            return end("Sorry, this number cannot", "be registered.")
-        u = User(phone=p, district=d, language="en", roles=["farmer"], terms_accepted_at=datetime.now(timezone.utc))
+            pin_hash = pinlib.hash_for_new_user(p, pins[0])
+        except ValueError as e:
+            return end(str(e), "Dial again.")
+        u = User(phone=p, district=d, language="en", roles=["farmer"], terms_accepted_at=datetime.now(timezone.utc),
+                 terms_version=settings.TERMS_VERSION, pin_hash=pin_hash)
         db.add(u)
         db.commit()
-        write_audit_log(db, str(u.id), "ussd.register", "user", str(u.id), after={"district": d})
+        write_audit_log(db, str(u.id), "ussd.register", "user", str(u.id), after={"district": d, "terms_version": settings.TERMS_VERSION})
         return end(f"Welcome! Registered in {d}.", "Dial again to use all services.")

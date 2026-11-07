@@ -86,4 +86,8 @@ export interface UserProfile {
   district: string;
   roles: ('farmer' | 'validator' | 'admin' | 'ngo')[];
   createdAt: string;
+  /** true until the current Terms & Privacy Policy version has been accepted */
+  needsConsent?: boolean;
+  smsAlerts?: boolean;
+  hasPin?: boolean;
 }

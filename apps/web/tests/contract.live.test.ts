@@ -17,7 +17,7 @@ describe.skipIf(!API || !ADMIN)('web <-> backend contract (live)', () => {
     const { default: axios } = await import('axios');
     const base = `${API}/api/v1`;
     const j = (await axios.post(`${base}/auth/otp/request`, { phone })).data;
-    const t = (await axios.post(`${base}/auth/otp/verify`, { phone, otp: j.dev_otp, district })).data;
+    const t = (await axios.post(`${base}/auth/otp/verify`, { phone, otp: j.dev_otp, district, accept_terms: true })).data;
     return t.access_token as string;
   }
   const as = (token: string) => { apiClient.defaults.headers.common.Authorization = `Bearer ${token}`; };
@@ -80,5 +80,38 @@ describe.skipIf(!API || !ADMIN)('web <-> backend contract (live)', () => {
     await expect(offline.addListing({ type: 'seed', title: 'bad', quantity: 1, unit: 'kg', priceUsd: -1, district: 'Chipinge' }))
       .rejects.toMatchObject({ status: 422, offline: false });
     expect(await offline.outboxCounts()).toEqual({ pending: 0, failed: 0 });
+  });
+
+  it('consent, PIN, export and deletion through the real web client', async () => {
+    const { default: axios } = await import('axios');
+    const base = `${API}/api/v1`;
+    const ph = rnd();
+    const j = (await axios.post(`${base}/auth/otp/request`, { phone: ph })).data;
+
+    // new number without ticking the box -> clear 400, and the SAME code still works afterwards
+    apiClient.defaults.headers.common.Authorization = '';
+    await expect(apiClient.post('/auth/otp/verify', { phone: ph, otp: j.dev_otp, district: 'Chipinge' }))
+      .rejects.toMatchObject({ status: 400, offline: false, detail: expect.stringMatching(/accept the Terms/i) });
+    const v = (await apiClient.post('/auth/otp/verify', { phone: ph, otp: j.dev_otp, district: 'Chipinge', accept_terms: true })).data;
+    expect(v.user).toMatchObject({ needs_consent: false, sms_alerts: true, has_pin: false });
+    as(v.access_token);
+
+    // validated preferences
+    await expect(apiClient.patch('/auth/me', { district: 'Atlantis' })).rejects.toMatchObject({ status: 422 });
+    expect((await apiClient.patch('/auth/me', { sms_alerts: false })).data.sms_alerts).toBe(false);
+
+    // PIN: weak rejected, good accepted
+    await expect(apiClient.put('/auth/me/pin', { pin: '1234' })).rejects.toMatchObject({ status: 422 });
+    await apiClient.put('/auth/me/pin', { pin: '4829' });
+    expect((await apiClient.get('/auth/me')).data.has_pin).toBe(true);
+
+    // export has my data and never the PIN hash
+    const exp = (await apiClient.get('/auth/me/export')).data;
+    expect(exp.profile.phone).toContain(ph.slice(1));
+    expect(JSON.stringify(exp)).not.toMatch(/pin_hash|\$2b\$/);
+
+    // delete -> token no longer works
+    await apiClient.post('/auth/me/delete-account', { confirm: true });
+    await expect(apiClient.get('/auth/me')).rejects.toMatchObject({ status: 401 });
   });
 });

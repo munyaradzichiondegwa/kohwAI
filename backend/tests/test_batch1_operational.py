@@ -69,14 +69,17 @@ async def test_startup_refuses_default_secret_outside_development(monkeypatch):
 
 # ── A7: audit log — real timestamps, append-only, actually written ──
 def test_audit_log_timestamps_are_real_and_append_only():
+    import uuid
+    tag = uuid.uuid4().hex[:8]          # the table is append-only, so rows from earlier runs stay: use unique names
+    a1, a2 = f"T1-{tag}", f"T2-{tag}"
     db = SessionLocal()
     try:
-        db.execute(text("INSERT INTO audit_logs (id, action, entity_type) VALUES (gen_random_uuid(), 'T1', 't')"))
+        db.execute(text("INSERT INTO audit_logs (id, action, entity_type) VALUES (gen_random_uuid(), :a, 't')"), {"a": a1})
         db.commit(); time.sleep(1.2)
-        db.execute(text("INSERT INTO audit_logs (id, action, entity_type) VALUES (gen_random_uuid(), 'T2', 't')"))
+        db.execute(text("INSERT INTO audit_logs (id, action, entity_type) VALUES (gen_random_uuid(), :a, 't')"), {"a": a2})
         db.commit()
-        rows = dict(db.execute(text("SELECT action, timestamp FROM audit_logs WHERE action IN ('T1','T2')")).all())
-        assert rows["T2"] > rows["T1"], "timestamps are frozen (default evaluated at migration time)"
+        rows = dict(db.execute(text("SELECT action, timestamp FROM audit_logs WHERE action IN (:a, :b)"), {"a": a1, "b": a2}).all())
+        assert rows[a2] > rows[a1], "timestamps are frozen (default evaluated at migration time)"
         for stmt in ("UPDATE audit_logs SET action='x'", "DELETE FROM audit_logs", "TRUNCATE audit_logs"):
             with pytest.raises(DBAPIError):
                 db.execute(text(stmt)); db.commit()
@@ -86,9 +89,10 @@ def test_audit_log_timestamps_are_real_and_append_only():
 
 
 async def test_login_is_audited(client):
-    phone = "+263771000010"
+    import uuid
+    phone = f"+2637{uuid.uuid4().int % 10**8:08d}"      # brand-new number every run: the test must not depend on leftover DB state
     j = (await client.post("/api/v1/auth/otp/request", json={"phone": phone})).json()
-    r = await client.post("/api/v1/auth/otp/verify", json={"phone": phone, "otp": j["dev_otp"]})
+    r = await client.post("/api/v1/auth/otp/verify", json={"phone": phone, "otp": j["dev_otp"], "accept_terms": True})   # new accounts need consent
     assert r.status_code == 200
     uid = r.json()["user"]["id"]
     bad = await client.post("/api/v1/auth/otp/request", json={"phone": phone})

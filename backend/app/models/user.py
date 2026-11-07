@@ -16,6 +16,13 @@ class User(Base, UUIDMixin, TimestampMixin):
     data_export_requested_at = Column(DateTime(timezone=True), nullable=True)
     # When the person accepted the Terms & Privacy Policy (PRD: explicit consent at registration).
     terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version     = Column(String(30), nullable=True)
+    # Receive alert SMS for my district (consented to at registration; can be switched off).
+    sms_alerts        = Column(Boolean, nullable=False, default=True, server_default="true")
+    # USSD / account PIN. Never stored in clear: HMAC(secret, phone:pin) then bcrypt. See modules/identity/pin.py
+    pin_hash            = Column(String(128), nullable=True)
+    pin_failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    pin_locked_until    = Column(DateTime(timezone=True), nullable=True)
     diagnoses = relationship("DiagnosisReport", back_populates="user")
     livestock  = relationship("LivestockProfile",  back_populates="owner")
     listings   = relationship("MarketListing",     back_populates="seller")

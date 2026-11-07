@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api';
+import { toCamel } from '@/lib/case';
+import ConsentSummary from '@/components/ui/ConsentSummary';
 import { useAuthStore } from '@/stores/authStore';
 import { DISTRICTS } from '@kohwai/shared/constants';
 
@@ -15,31 +17,24 @@ export default function RegisterPage() {
   const [form, setForm]       = useState({ phone:'', district:'', language:'en' });
   const [otp, setOtp]         = useState('');
 
-  const [offlineNotice, setOfflineNotice] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   async function requestOtp() {
     setLoading(true); setError('');
-    try { await apiClient.post('/auth/otp/request', { phone:form.phone }); setStep('otp'); }
-    catch (e:any) { setOfflineNotice(true); setStep('otp'); }
+    try { await apiClient.post('/auth/otp/request', { phone: form.phone }); setStep('otp'); }
+    catch (e: any) {
+      setError(e?.offline ? 'You need a connection to create an account. Please try again when you have signal.' : (e?.detail || 'Could not send the code.'));
+    }
     finally { setLoading(false); }
   }
   async function verify() {
     setLoading(true); setError('');
     try {
-      const res = await apiClient.post('/auth/otp/verify', { ...form, otp });
-      setAuth(res.data.access_token, res.data.refresh_token, res.data.user);
+      const res = await apiClient.post('/auth/otp/verify', { ...form, otp, accept_terms: accepted });
+      setAuth(res.data.access_token, res.data.refresh_token, toCamel(res.data.user));
       router.push('/dashboard');
-    } catch (e:any) {
-      if (offlineNotice || !navigator.onLine) {
-        setAuth(`local-${Date.now()}`, '', {
-          id: `local-${form.phone}`, phone: form.phone,
-          language: form.language as any, district: form.district,
-          roles: ['farmer'], createdAt: new Date().toISOString(),
-        });
-        router.push('/dashboard');
-      } else {
-        setError(e?.detail || 'Invalid OTP.');
-      }
+    } catch (e: any) {
+      setError(e?.offline ? 'No connection. Please try again when you have signal.' : (e?.detail || 'Invalid code.'));
     }
     finally { setLoading(false); }
   }
@@ -52,11 +47,6 @@ export default function RegisterPage() {
           <p className="text-sm text-gray-500">Free for Zimbabwean farmers</p>
         </div>
         {error && <p className="text-red-600 text-sm mb-4 bg-red-50 rounded-lg p-2">{error}</p>}
-        {offlineNotice && step === 'otp' && (
-          <p className="text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 mb-4">
-            No backend connection found. Continuing in offline mode — enter any 6 digits to finish registration locally.
-          </p>
-        )}
         {step === 'form' ? (
           <div className="space-y-4">
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
@@ -74,7 +64,12 @@ export default function RegisterPage() {
                 className="w-full border border-gray-300 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-brand-green focus:outline-none">
                 <option value="en">English</option><option value="sn">Shona</option><option value="nd">Ndebele</option>
               </select></div>
-            <button onClick={requestOtp} disabled={loading||!form.phone||!form.district}
+            <ConsentSummary />
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} className="mt-1" />
+              I accept the Terms and Privacy Policy and want SMS alerts for my district
+            </label>
+            <button onClick={requestOtp} disabled={loading||!form.phone||!form.district||!accepted}
               className="w-full mt-2 bg-brand-green text-white rounded-xl py-3 font-semibold disabled:opacity-50">
               {loading ? 'Sending…' : 'Send Verification Code'}
             </button>

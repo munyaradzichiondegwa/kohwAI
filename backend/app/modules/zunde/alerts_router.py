@@ -66,4 +66,9 @@ def create_alert(body: AlertCreate, db: Session = Depends(get_db), user: User = 
     db.refresh(alert)
     write_audit_log(db, str(user.id), "alert.create", "alert", str(alert.id),
                     after={"severity": body.severity, "district": body.district, "title": body.title})
+    try:    # don't wait for the 5-minute beat: PRD wants alerts out within minutes
+        from app.core.celery_app import celery_app
+        celery_app.send_task("app.workers.alerts.dispatch_pending_alerts")
+    except Exception:  # noqa: BLE001
+        pass
     return {"id": str(alert.id)}

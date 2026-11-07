@@ -127,7 +127,9 @@ def evaluate_pest_outbreak(db: Session, district: str) -> CrossPillarInsight | N
                                       severity="red", message=msg)
         db.add(insight)
         db.add(Alert(pillar="zunde", type="pest", severity="red", title=f"{species} outbreak reported",
-                      body=msg, district=district))
+                      body=msg, district=district, source="intelligence",
+                      extra_data={"requires_validation": True, "species": species},   # SMS held until a validator approves a report
+                      expires_at=datetime.now(timezone.utc) + timedelta(days=7)))
         db.commit()
         db.refresh(insight)
         first_created = first_created or insight       # keep going: other species may also qualify

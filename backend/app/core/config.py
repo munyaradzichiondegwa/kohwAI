@@ -28,6 +28,20 @@ class Settings(BaseSettings):
     # could POST as any phone number and file reports / listings in that farmer's name).
     USSD_ALLOWED_IPS: str = ""
 
+    # ── Alert dispatch (SMS) ────────────────────────────────────────────────
+    ALERT_SMS_SEVERITIES: str = "red,darkRed"     # comma list; lower severities are in-app only (SMS costs money, spam erodes trust)
+    ALERT_SMS_DAILY_CAP: int = 3                  # max alert SMS per farmer per day
+    ALERT_MAX_AGE_HOURS: int = 48                 # never SMS an alert older than this (e.g. after a long outage)
+    ALERT_SMS_BATCH: int = 100                    # recipients per gateway call
+    ALERT_SMS_MAX_ATTEMPTS: int = 3
+    RISK_MODEL_ALERTS_ENABLED: bool = False       # the livestock-risk heuristic is unvalidated: no farmer alerts until a vet signs off
+    USSD_SERVICE_CODE: str = ""                   # e.g. "*123#" — shown in SMS text only when set
+
+    # ── Accounts: PIN + consent ──────────────────────────────────────────────
+    PIN_MAX_ATTEMPTS: int = 3
+    PIN_LOCK_MINUTES: int = 30
+    TERMS_VERSION: str = "2026-11-draft"          # bump when Terms/Privacy change: users are asked to re-accept
+
     # Real helpline numbers shown to farmers in emergencies. Left blank on purpose:
     # we never display a number nobody has verified. Set in .env once Agritex / Vet Services confirm them.
     VET_SERVICES_CONTACT: str = ""

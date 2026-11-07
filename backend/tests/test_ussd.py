@@ -15,6 +15,7 @@ from app.modules.ussd.menus import MAX_LEN
 from tests.conftest import make_user
 
 H = USSDHandler()
+PIN = "4829"
 
 
 def fresh_phone() -> str:
@@ -24,7 +25,9 @@ FAKE_MARKERS = ["Masvingo Village Well", "Chipinge  Mon", "42/100", "0800-", "Co
 
 
 def ask(db, phone, *inputs):
-    return H.route(db, phone, resolve(list(inputs)))
+    out = H.route(db, phone, resolve(list(inputs)))
+    assert len(out) <= MAX_LEN, f"USSD screen is {len(out)} chars (limit {MAX_LEN}): {out!r}"      # every test response, not just the walk
+    return out
 
 
 async def post(client, text, phone="+263771234567"):
@@ -84,7 +87,7 @@ async def test_ussd_gateway_flag_off_and_ip_allowlist(client, db, monkeypatch):
 # ───────── real data, no fakes ─────────
 def test_weather_planting_solar_come_from_stored_readings(db, clean):
     seed(db)
-    u = make_user(db, "Chipinge")
+    u = make_user(db, "Chipinge", pin=PIN)
     w = ask(db, u.phone, "1", "1")
     assert w.startswith("END") and "Chipinge" in w and "6.0mm" in w and "Observed, not a forecast" in w
     p = ask(db, u.phone, "1", "4")
@@ -103,14 +106,14 @@ def test_no_data_says_so_instead_of_inventing(db, clean):
 
 
 def test_boreholes_screen_shows_real_names_and_verification(db, clean):
-    seed(db); u = make_user(db, "Chipinge")
+    seed(db); u = make_user(db, "Chipinge", pin=PIN)
     out = ask(db, u.phone, "2", "1")
     assert "Mutema Primary S: working" in out and "Dry Gulley Boreh: dry (unverified)" in out
     assert out.index("working") < out.index("dry")                         # best status first
 
 
 def test_browse_shows_phone_only_when_seller_opted_in(db, clean):
-    seed(db); u = make_user(db, "Chipinge")
+    seed(db); u = make_user(db, "Chipinge", pin=PIN)
     assert "SC403 certifie 40kg $1.8 07" in ask(db, u.phone, "4", "1", "1")
     db.query(MarketListing).update({"share_phone": False}); db.commit()
     out = ask(db, u.phone, "4", "1", "1")
@@ -129,7 +132,7 @@ def test_diagnosis_screens_are_honest_and_short(db):
 
 
 def test_battery_calculator_uses_real_energy_model(db, clean):
-    seed(db); u = make_user(db, "Chipinge")
+    seed(db); u = make_user(db, "Chipinge", pin=PIN)
     out = ask(db, u.phone, "3", "2", "1000", "10000", "5", "1")
     # 1000W * 5.5 kWh/m2 * 0.75 = 4125 Wh/day; +41.25% - 0.24% (1W load) + 5% start = ~46% after any 24h, whatever the clock
     assert "Battery now 5%" in out and "In 24h: ~46%" in out and "live sun data" in out
@@ -139,19 +142,27 @@ def test_battery_calculator_uses_real_energy_model(db, clean):
 
 
 # ───────── registration & writes ─────────
-def test_registration_requires_consent_and_stores_it(db):
+def test_registration_requires_consent_district_and_pin(db):
     phone = fresh_phone()
-    assert "accept the KohwAI Terms" in ask(db, phone, "5")
+    consent = ask(db, phone, "5")
+    assert "accept the KohwAI Terms" in consent and "SMS" in consent
     assert ask(db, phone, "5", "2") == "END Invalid choice. Dial again to restart."
     page1 = ask(db, phone, "5", "1")
     assert "1. Chipinge" in page1 and "8. More" in page1 and "9." not in page1          # '9' is reserved for Menu
     page2 = ask(db, phone, "5", "1", "8")
     assert "1. Mutare" in page2 and "3. Masvingo" in page2 and "Chipinge" not in page2
-    done = ask(db, phone, "5", "1", "8", "3")
+    assert "Create a 4-digit PIN" in ask(db, phone, "5", "1", "8", "3")
+    assert "Confirm your PIN" in ask(db, phone, "5", "1", "8", "3", PIN)
+    assert db.query(User).filter_by(phone=phone).first() is None                      # nothing saved until PIN confirmed
+    assert "did not match" in ask(db, phone, "5", "1", "8", "3", PIN, "1111")
+    assert "too easy" in ask(db, phone, "5", "1", "8", "3", "1234", "1234")
+    assert db.query(User).filter_by(phone=phone).first() is None
+    done = ask(db, phone, "5", "1", "8", "3", PIN, PIN)
     assert "Registered in Masvingo" in done
     u = db.query(User).filter_by(phone=phone).one()
-    assert u.terms_accepted_at is not None and u.roles == ["farmer"] and u.district == "Masvingo"
-    assert "Registered: Masvingo" in ask(db, phone, "5")             # now recognised
+    assert u.terms_accepted_at is not None and u.terms_version == settings.TERMS_VERSION and u.sms_alerts is True
+    assert u.roles == ["farmer"] and u.district == "Masvingo" and u.pin_hash and PIN not in u.pin_hash
+    assert "Registered: Masvingo" in ask(db, phone, "5")                               # now recognised
 
 
 def test_writes_require_registration(db):
@@ -161,45 +172,45 @@ def test_writes_require_registration(db):
 
 
 def test_pest_report_creates_pending_sighting(db, clean):
-    u = make_user(db, "Chipinge")
-    out = ask(db, u.phone, "1", "5", "1", "3")
+    u = make_user(db, "Chipinge", pin=PIN)
+    out = ask(db, u.phone, "1", "5", PIN, "1", "3")
     assert out.startswith("END Thank you")
     s = db.query(PestSighting).one()
     assert s.species == "Fall Armyworm" and s.severity == "high" and s.status == "pending" and s.district == "Chipinge"
-    assert ask(db, u.phone, "1", "5", "9x") == "END Invalid choice. Dial again to restart."
+    assert ask(db, u.phone, "1", "5", PIN, "9x") == "END Invalid choice. Dial again to restart."
 
 
 def test_borehole_report_is_pending_and_updates_not_stacks(db, clean):
-    seed(db); u = make_user(db, "Chipinge")
-    assert ask(db, u.phone, "2", "2", "1", "3").startswith("END Thank you")
-    ask(db, u.phone, "2", "2", "1", "4")
+    seed(db); u = make_user(db, "Chipinge", pin=PIN)
+    assert ask(db, u.phone, "2", "2", PIN, "1", "3").startswith("END Thank you")
+    ask(db, u.phone, "2", "2", PIN, "1", "4")
     reports = db.query(BoreholeReport).all()
     assert len(reports) == 1 and reports[0].status == "pending" and reports[0].new_status == "broken"
     assert db.query(Borehole).filter_by(name="Mutema Primary School Community Borehole").one().status == "working"
 
 
 def test_sell_flow_creates_a_validated_listing(db, clean):
-    u = make_user(db, "Chipinge")
-    assert ask(db, u.phone, "4", "2", "2", "Maize <script>", "1", "50", "0.3").startswith("CON Maize script 50kg $0.3")
-    out = ask(db, u.phone, "4", "2", "2", "Maize <script>", "1", "50", "0.3", "2")
+    u = make_user(db, "Chipinge", pin=PIN)
+    assert ask(db, u.phone, "4", "2", PIN, "2", "Maize <script>", "1", "50", "0.3").startswith("CON Maize script 50kg $0.3")
+    out = ask(db, u.phone, "4", "2", PIN, "2", "Maize <script>", "1", "50", "0.3", "2")
     assert out.startswith("END Listed!")
     m = db.query(MarketListing).one()
     assert m.title == "Maize script" and float(m.quantity) == 50 and m.share_phone is False and m.expires_at > datetime.now(timezone.utc)
-    assert "Invalid number" in ask(db, u.phone, "4", "2", "2", "Maize", "1", "-5")
-    assert "Invalid price" in ask(db, u.phone, "4", "2", "2", "Maize", "1", "5", "abc")
+    assert "Invalid number" in ask(db, u.phone, "4", "2", PIN, "2", "Maize", "1", "-5")
+    assert "Invalid price" in ask(db, u.phone, "4", "2", PIN, "2", "Maize", "1", "5", "abc")
 
 
 def test_insurance_screen_reflects_flag_and_real_enrolment(db, clean):
     from app.modules.settings_module.service import upsert_setting
-    u = make_user(db, "Chipinge")
+    u = make_user(db, "Chipinge", pin=PIN)
     assert "open yet" in ask(db, u.phone, "4", "3")                      # flag OFF by default
     upsert_setting(db, "feature_flags", {"musika_insurance_enrollment": True, "ussd_gateway": True,
                                          "livestock_ai_photo_diagnosis": False}, None, str(u.id))
     try:
-        assert "not enrolled" in ask(db, u.phone, "4", "3")
+        assert "not enrolled" in ask(db, u.phone, "4", "3", PIN)
         from app.modules.musika.insurance_service import enroll
         enroll(db, str(u.id), "Chipinge", "2099-00", None, today=date(2099, 1, 5))
-        out = ask(db, u.phone, "4", "3")
+        out = ask(db, u.phone, "4", "3", PIN)
         assert "Cover 2099-00 Chipinge" in out and "No satellite data yet" in out
     finally:
         upsert_setting(db, "feature_flags", {"musika_insurance_enrollment": False, "ussd_gateway": True,
@@ -213,24 +224,89 @@ def test_every_reachable_screen_fits_160_chars(db, clean, monkeypatch, district)
     monkeypatch.setattr(settings, "AGRITEX_CONTACT", "0242 111 222")
     seed(db, district)
     from app.modules.settings_module.service import upsert_setting
-    registered = make_user(db, district)
+    registered = make_user(db, district, pin=PIN)
+    no_pin = make_user(db, district)
     unregistered = "+263774445555"
-    inputs = ["1", "2", "3", "4", "5", "6", "7", "8", "Maize grain", "50", "2.5", "1000", "10000", "80"]
-    seen_screens, over, fakes, calls = set(), [], [], 0
-    for phone in (registered.phone, unregistered):
+    inputs = ["1", "2", "3", "4", "5", "6", "7", "8", "Maize grain", "50", "2.5", "1000", "10000", "80", PIN, "7391"]
+    texts, over, fakes, calls = set(), [], [], 0
+    for phone in (registered.phone, no_pin.phone, unregistered):
+        seen_screens = set()                       # each phone gets its own walk (different account state = different screens)
         queue = collections.deque([[]])
-        while queue and calls < 6000:
+        while queue and calls < 20000:
             path = queue.popleft()
+            # the walker deliberately tries wrong PINs; un-lock so it can keep exploring behind the PIN gate
+            db.query(User).filter(User.id.in_([registered.id, no_pin.id])).update(
+                {"pin_failed_attempts": 0, "pin_locked_until": None}, synchronize_session=False)
+            db.commit()
             screen = H.route(db, phone, path); calls += 1
             if len(screen) > MAX_LEN: over.append((len(screen), path, screen))
             if any(f in screen for f in FAKE_MARKERS): fakes.append((path, screen))
-            if screen in seen_screens or not screen.startswith("CON") or len(path) >= 9:
+            key = (screen, tuple(path[:2]))           # same text reached through a different flow is a different state
+            if key in seen_screens or not screen.startswith("CON") or len(path) >= 10:
                 continue
-            seen_screens.add(screen)
+            seen_screens.add(key)
             for i in inputs:
                 queue.append(path + [i])
+        texts |= {t for t, _ in seen_screens}
         db.rollback()
     assert not over, over[:3]
     assert not fakes, fakes[:3]
-    assert len(seen_screens) > 40 and calls > 200                          # the walk really covered the tree
+    must_reach = ["CON Which pest?", "CON How bad?", "CON Status now?", "CON Which borehole?", "CON Unit:", "CON SMS alerts for your district",
+                  "CON New 4-digit PIN", "CON Confirm new PIN", "CON Create a 4-digit PIN", "CON Confirm your PIN", "CON Your district:",
+                  "CON Enter your PIN:", "CON Solar panel watts?", "CON Browse:", "CON Which crop?", "CON Which animal?"]
+    missing = [m for m in must_reach if not any(t.startswith(m) for t in texts)]
+    assert not missing, f"walk never reached: {missing}"                          # the walk really covered the tree
     db.query(User).filter(User.phone == unregistered).delete(); db.commit()
+
+
+# ───────── PIN gate ─────────
+def test_every_write_and_personal_screen_asks_for_the_pin_first(db, clean):
+    seed(db); u = make_user(db, "Chipinge", pin=PIN)
+    from app.modules.settings_module.service import upsert_setting
+    for path in (("1", "5"), ("2", "2"), ("4", "2"), ("5", "1"), ("5", "2"), ("5", "3")):
+        assert ask(db, u.phone, *path).startswith("CON Enter your PIN"), path
+    assert db.query(PestSighting).count() == 0
+    # public reads never ask
+    for path in (("1", "1"), ("1", "2"), ("2", "1"), ("3", "1")):
+        assert "PIN" not in ask(db, u.phone, *path), path
+
+
+def test_wrong_pin_counts_down_then_locks_and_right_pin_is_refused_while_locked(db, clean):
+    u = make_user(db, "Chipinge", pin=PIN)
+    r1 = ask(db, u.phone, "1", "5", "0001x")
+    assert "Wrong PIN" in r1 and "2 tries left" in r1
+    assert "1 tries left" in ask(db, u.phone, "1", "5", "7777")
+    locked = ask(db, u.phone, "1", "5", "6543")
+    assert "Locked for 30 min" in locked
+    assert "Locked for 30 min" in ask(db, u.phone, "1", "5", PIN)                      # correct PIN still refused
+    db.expire_all()
+    u = db.get(User, u.id)
+    assert u.pin_locked_until is not None
+    u.pin_locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)             # lock expires
+    db.commit()
+    assert ask(db, u.phone, "1", "5", PIN).startswith("CON Which pest?")
+    db.expire_all()
+    assert db.get(User, u.id).pin_failed_attempts == 0                                 # success resets the counter
+
+
+def test_account_without_pin_creates_one_then_ends_session(db, clean):
+    u = make_user(db, "Chipinge")                                      # e.g. registered through the web app: no PIN yet
+    assert "Create a 4-digit PIN" in ask(db, u.phone, "1", "5")
+    assert "Confirm your PIN" in ask(db, u.phone, "1", "5", PIN)
+    out = ask(db, u.phone, "1", "5", PIN, PIN)
+    assert out.startswith("END PIN saved")
+    db.expire_all()
+    assert db.get(User, u.id).pin_hash
+    assert ask(db, u.phone, "1", "5", PIN).startswith("CON Which pest?")
+
+
+def test_sms_alert_preference_and_pin_change_via_ussd(db, clean):
+    u = make_user(db, "Chipinge", pin=PIN)
+    assert "SMS alerts: ON" in ask(db, u.phone, "5")
+    assert "Turn OFF" in ask(db, u.phone, "5", "2", PIN)
+    assert "now" in ask(db, u.phone, "5", "2", PIN, "2") and "OFF" in ask(db, u.phone, "5", "2", PIN, "2")
+    db.expire_all(); assert db.get(User, u.id).sms_alerts is False
+    assert "New 4-digit PIN" in ask(db, u.phone, "5", "3", PIN)
+    assert "PIN changed" in ask(db, u.phone, "5", "3", PIN, "7391", "7391")
+    assert "Wrong PIN" in ask(db, u.phone, "1", "5", PIN)                              # old PIN no longer works
+    assert ask(db, u.phone, "1", "5", "7391").startswith("CON Which pest?")
