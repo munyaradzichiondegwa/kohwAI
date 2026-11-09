@@ -1,9 +1,24 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
 from typing import List
+from urllib.parse import quote
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _secrets_dir() -> str | None:
+    """Docker/Compose mounts secrets as files in /run/secrets (one file per secret, named exactly like the setting).
+    Reading them here keeps passwords and keys out of environment variables, `docker inspect` and process listings."""
+    explicit = os.environ.get("SECRETS_DIR")
+    if explicit:
+        return explicit
+    return "/run/secrets" if os.path.isdir("/run/secrets") else None
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
+        secrets_dir=_secrets_dir(),
         case_sensitive=True,
         extra="ignore"
     )
@@ -46,6 +61,16 @@ class Settings(BaseSettings):
     # we never display a number nobody has verified. Set in .env once Agritex / Vet Services confirm them.
     VET_SERVICES_CONTACT: str = ""
     AGRITEX_CONTACT: str = ""
+
+    # Connection parts (production): the URLs below are built from these when not given explicitly, so a password
+    # held in a secret file can be used safely (special characters are URL-escaped).
+    POSTGRES_HOST: str = ""
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "kohwai"
+    POSTGRES_DB: str = "kohwai"
+    POSTGRES_PASSWORD: str = ""
+    REDIS_HOST: str = ""
+    REDIS_PASSWORD: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql://kohwai:secret@localhost:5432/kohwai"
@@ -94,5 +119,49 @@ class Settings(BaseSettings):
 
     # CORS
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3010", "http://localhost:3000", "http://localhost:8000"]
+
+    @model_validator(mode="after")
+    def _compose_urls(self):
+        given = self.model_fields_set          # anything the operator set explicitly always wins
+        if self.POSTGRES_HOST and "DATABASE_URL" not in given:
+            pw = quote(self.POSTGRES_PASSWORD, safe="")
+            self.DATABASE_URL = f"postgresql://{self.POSTGRES_USER}:{pw}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        if self.REDIS_HOST:
+            auth = f":{quote(self.REDIS_PASSWORD, safe='')}@" if self.REDIS_PASSWORD else ""
+            base = f"redis://{auth}{self.REDIS_HOST}:6379"
+            if "REDIS_URL" not in given:
+                self.REDIS_URL = f"{base}/0"
+            if "CELERY_BROKER_URL" not in given:
+                self.CELERY_BROKER_URL = f"{base}/0"
+            if "CELERY_RESULT_BACKEND" not in given:
+                self.CELERY_RESULT_BACKEND = f"{base}/1"
+        return self
+
+    def production_problems(self) -> tuple[list[str], list[str]]:
+        """-> (errors, warnings). Errors make the API refuse to start outside development: each one is a
+        misconfiguration that would expose farmers' data or let anyone act as anyone."""
+        if self.ENVIRONMENT == "development":
+            return [], []
+        errors, warnings = [], []
+        if self.SECRET_KEY in ("", "changeme") or len(self.SECRET_KEY) < 32:
+            errors.append("SECRET_KEY must be a random value of at least 32 characters (it signs every login token)")
+        if self.DEBUG:
+            errors.append("DEBUG must be off")
+        if self.EXPOSE_DEV_OTP:
+            errors.append("EXPOSE_DEV_OTP must be off (it returns login codes in API responses)")
+        if ":secret@" in self.DATABASE_URL or ":changeme@" in self.DATABASE_URL:
+            errors.append("the database is using a default password")
+        if any(("localhost" in o or "127.0.0.1" in o or o.strip() == "*") for o in self.ALLOWED_ORIGINS):
+            errors.append("ALLOWED_ORIGINS must list only your real https origin(s), not localhost or *")
+        if not self.AT_API_KEY:
+            warnings.append("AT_API_KEY is empty: login codes and alert SMS cannot be delivered, so nobody can sign in")
+        if "@" not in self.REDIS_URL:
+            warnings.append("Redis has no password")
+        if not self.USSD_ALLOWED_IPS.strip():
+            warnings.append("USSD_ALLOWED_IPS is empty: all USSD traffic will be rejected (fail-closed)")
+        if not (self.VET_SERVICES_CONTACT.strip() and self.AGRITEX_CONTACT.strip()):
+            warnings.append("helpline numbers (VET_SERVICES_CONTACT / AGRITEX_CONTACT) are not set: advice will say 'your nearest office'")
+        return errors, warnings
+
 
 settings = Settings()

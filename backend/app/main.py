@@ -5,7 +5,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 import sentry_sdk
 from app.core.config import settings
 from app.api.v1.router import api_router
-import json, asyncio
+import json, asyncio, logging
 
 # Initialise Sentry
 if settings.SENTRY_DSN:
@@ -14,10 +14,13 @@ if settings.SENTRY_DSN:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: refuse to run outside development with the default JWT secret
-    # (anyone could forge admin tokens).
-    if settings.ENVIRONMENT != "development" and settings.SECRET_KEY in ("changeme", ""):
-        raise RuntimeError("SECRET_KEY must be set to a strong random value when ENVIRONMENT != 'development'")
+    # Startup: outside development refuse to run with unsafe configuration (default JWT secret, debug/OTP echo on,
+    # default DB password, localhost CORS...). Softer problems are logged loudly.
+    errors, warnings = settings.production_problems()
+    for w in warnings:
+        logging.getLogger("kohwai.config").warning("CONFIG WARNING: %s", w)
+    if errors:
+        raise RuntimeError("Refusing to start with unsafe configuration: " + "; ".join(errors))
     yield
     # Shutdown
 

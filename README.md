@@ -283,7 +283,7 @@ Rule-based correlation logic that reads real rows across the other modules, deli
 
 ## 🔴 Real-Time Alerts
 
-A WebSocket endpoint (`/ws/alerts/{district}`) exists in `main.py`, but **nothing publishes to it yet and it is not authenticated** — the web app polls `/alerts/active` instead. Treat WebSocket delivery as not implemented.
+A WebSocket endpoint (`/ws/alerts/{district}`) pushes alerts in real time: the first message must carry an access token, a user may only subscribe to their own district (admins: any), and messages arrive via Redis pub/sub from the alert worker. The web app still polls `/alerts/active`; wiring the socket into the UI is not done.
 
 ---
 
@@ -330,8 +330,10 @@ Requirements: `requirements-ml.txt` has scikit-learn, numpy, pandas, and mlflow;
 - AI training pipelines: complete and runnable, awaiting a labeled dataset
 
 ### Partially implemented
-- WebSocket alerts: endpoint exists but nothing broadcasts and it is unauthenticated
-- USSD: no PIN login yet (identity is the SIM/phone number), English only
+- WebSocket alerts: server side works (authenticated, Redis-backed) but no client uses it yet
+- USSD: English only; the PIN travels in the USSD session text (operator may log it) — fine for reports/listings, not for money
+- Alert SMS: implemented and tested against a fake gateway; **never run against the real Africa's Talking API yet**
+- Admin 2FA, refresh-token rotation: not built
 - Triage rules (`ussd/rules_engine.py` → `shared/rules/rules.json`) are **not yet signed off by Agritex / Veterinary Services**; coverage is maize+sorghum and cattle+poultry only
 - Helpline numbers must be set (`VET_SERVICES_CONTACT`, `AGRITEX_CONTACT`) — none are shipped
 - Map tiles default to openstreetmap.org (no offline tiles); set `NEXT_PUBLIC_TILE_URL` for production
@@ -549,3 +551,12 @@ NASA POWER for climate data, Africa's Talking for USSD/SMS infrastructure, and t
 ---
 
 <p align="center">Built for Zimbabwe. Designed for Africa.</p>
+
+
+## 🚀 Production deployment
+
+`docker-compose.prod.yml` + `docs/DEPLOYMENT.md` describe a single-VPS deployment: Caddy (automatic HTTPS) in front of the web app and API,
+PostgreSQL/Redis/Celery on a private network with no published ports, secrets as files, non-root read-only containers,
+a one-shot migration job, daily **encrypted** database backups (public-key `age`; the server cannot decrypt them) and a restore-drill script.
+The API refuses to start with unsafe settings (weak `SECRET_KEY`, debug/OTP echo on, default DB password, localhost CORS).
+`docker-compose.yml` remains the **development** stack only. Read the runbook's "non-code blockers" section before launching.

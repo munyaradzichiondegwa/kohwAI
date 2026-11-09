@@ -1,3 +1,8 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVELOPMENT stack only (default passwords, source mounted, --reload, Flower without auth).
+# Data-bearing and admin ports are bound to 127.0.0.1 so they are not exposed on shared networks.
+# For a real server use docker-compose.prod.yml (see docs/DEPLOYMENT.md).
+# ─────────────────────────────────────────────────────────────────────────────
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -9,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kohwai"]
       interval: 10s
@@ -25,13 +30,13 @@ services:
     volumes:
       - timescale_data:/var/lib/postgresql/data
     ports:
-      - "5435:5432"
+      - "127.0.0.1:5435:5432"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6382:6379"
+      - "127.0.0.1:6382:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -89,7 +94,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-    command: celery -A app.core.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
+    command: celery -A app.core.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler --schedule=/tmp/celerybeat-schedule
     depends_on:
       - celery_worker
     volumes:
@@ -103,7 +108,7 @@ services:
     env_file: .env
     command: celery -A app.core.celery_app flower --port=5555
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     depends_on:
       - celery_worker
 
@@ -111,7 +116,7 @@ services:
     image: ghcr.io/mlflow/mlflow:v2.10.0
     restart: unless-stopped
     ports:
-      - "5050:5000"
+      - "127.0.0.1:5050:5000"
     environment:
       MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://kohwai:${POSTGRES_PASSWORD:-secret}@db:5432/kohwai
     command: >
@@ -127,7 +132,7 @@ services:
     image: prom/prometheus:latest
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -136,7 +141,7 @@ services:
     image: grafana/grafana:latest
     restart: unless-stopped
     ports:
-      - "3012:3000"
+      - "127.0.0.1:3012:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"

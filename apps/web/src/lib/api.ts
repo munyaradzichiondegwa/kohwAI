@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// '' (empty) means same-origin, which is how production is deployed behind the reverse proxy; only `undefined` falls back.
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 /** Every failed request rejects with this shape, so callers can tell "offline" from "server said no". */
 export class ApiError extends Error {

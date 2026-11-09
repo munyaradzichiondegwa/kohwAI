@@ -24,3 +24,10 @@ backend/celerybeat-schedule*
 # Build artifacts
 *.tsbuildinfo
 backend/.pytest_cache/
+
+# Production secrets & state (never commit)
+/secrets/*
+!/secrets/.gitkeep
+/offline/
+.env.prod
+/backups/

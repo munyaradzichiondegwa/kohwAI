@@ -28,6 +28,9 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 pyotp==2.9.0
 
+# ── Production server ────────────────────────────────────────────
+gunicorn==22.0.0
+
 # ── Task queue ───────────────────────────────────────────────────
 celery==5.4.0
 # kombu is pinned: unpinned, pip resolves 5.7.x which requires redis-py>=6.1 and crashes with redis==5.0.5
