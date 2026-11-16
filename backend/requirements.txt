@@ -1,3 +1,4 @@
+
 # ── Web framework ───────────────────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
@@ -7,7 +8,7 @@ websockets==12.0
 # ── Database ─────────────────────────────────────────────────────
 sqlalchemy==2.0.30
 alembic==1.13.1
-# psycopg2-binary: use the pre-built wheel; requires Python <= 3.12
+# psycopg2-binary: use the pre-built wheel;requires Python <= 3.12
 # psycopg2-binary==2.9.9 has no Windows wheel for Python 3.13, which forces
 # pip to build from source (needs a C++ compiler and pg_config) and fails on
 # a plain Windows setup. 2.9.12 has confirmed prebuilt wheels for cp313 on
@@ -43,8 +44,8 @@ httpx==0.27.0
 requests==2.32.3
 
 # ── Geospatial (lightweight — no libgdal needed) ─────────────────
-shapely==2.0.4
-# GeoAlchemy2 requires libgdal on Windows — install separately if needed
+shapely==2.1.2
+# GeoAlchemy2 requires libgdal on Windows —install separately if needed
 # geoalchemy2==0.15.1
 
 # ── Monitoring ───────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DEVELOPMENT stack only (default passwords, source mounted, --reload, Flower without auth).
 # Data-bearing and admin ports are bound to 127.0.0.1 so they are not exposed on shared networks.
@@ -38,7 +39,7 @@ services:
     ports:
       - "127.0.0.1:6382:6379"
     volumes:
-      - redis_data:/data
+      - redis_recovery_work:/data
     command: redis-server --appendonly yes
 
   api:
@@ -106,6 +107,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql://kohwai:${POSTGRES_PASSWORD:-secret}@db:5432/kohwai
+      TIMESCALE_URL: postgresql://kohwai:${POSTGRES_PASSWORD:-secret}@timescaledb:5432/kohwai_ts
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     command: celery -A app.core.celery_app flower --port=5555
     ports:
       - "127.0.0.1:5555:5555"
@@ -154,5 +161,8 @@ volumes:
   postgres_data:
   timescale_data:
   redis_data:
+  redis_recovery_work:
+    external: true
+    name: kohwai_redis_recovery_work
   prometheus_data:
   grafana_data:

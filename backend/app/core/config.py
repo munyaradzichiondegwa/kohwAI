@@ -1,4 +1,6 @@
+
 import os
+from pathlib import Path
 from typing import List
 from urllib.parse import quote
 
@@ -15,9 +17,13 @@ def _secrets_dir() -> str | None:
     return "/run/secrets" if os.path.isdir("/run/secrets") else None
 
 
+# Resolve the project-root .env file independently of the working directory.
+_REPO_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_REPO_ROOT_ENV),
         secrets_dir=_secrets_dir(),
         case_sensitive=True,
         extra="ignore"
@@ -28,42 +34,39 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     SECRET_KEY: str = "changeme"
     DEBUG: bool = False
+
     # Dev convenience only; honoured solely when ENVIRONMENT == "development".
     EXPOSE_DEV_OTP: bool = False
 
-    # Parametric insurance rules (see modules/musika/insurance_service.py)
-    INSURANCE_DROUGHT_THRESHOLD: int = 70        # drought_index (0-100) at/above which a day "qualifies"
-    INSURANCE_MIN_CONSECUTIVE_DAYS: int = 5      # qualifying days in a row (PRD: >5 consecutive days)
-    INSURANCE_WAITING_DAYS: int = 14             # enrol at least this long before the dry spell began
-    INSURANCE_SEASON_START_MONTH: int = 11       # season runs Nov 1 .. Mar 31 of the following year
+    # Parametric insurance rules
+    INSURANCE_DROUGHT_THRESHOLD: int = 70
+    INSURANCE_MIN_CONSECUTIVE_DAYS: int = 5
+    INSURANCE_WAITING_DAYS: int = 14
+    INSURANCE_SEASON_START_MONTH: int = 11
     INSURANCE_SEASON_END_MONTH: int = 3
 
-    # Africa's Talking does not sign USSD callbacks. Comma-separated source IPs allowed to call
-    # /ussd/callback. Outside development an empty list REJECTS all USSD traffic (otherwise anyone
-    # could POST as any phone number and file reports / listings in that farmer's name).
+    # Africa's Talking USSD callback security
     USSD_ALLOWED_IPS: str = ""
 
-    # ── Alert dispatch (SMS) ────────────────────────────────────────────────
-    ALERT_SMS_SEVERITIES: str = "red,darkRed"     # comma list; lower severities are in-app only (SMS costs money, spam erodes trust)
-    ALERT_SMS_DAILY_CAP: int = 3                  # max alert SMS per farmer per day
-    ALERT_MAX_AGE_HOURS: int = 48                 # never SMS an alert older than this (e.g. after a long outage)
-    ALERT_SMS_BATCH: int = 100                    # recipients per gateway call
+    # Alert dispatch (SMS)
+    ALERT_SMS_SEVERITIES: str = "red,darkRed"
+    ALERT_SMS_DAILY_CAP: int = 3
+    ALERT_MAX_AGE_HOURS: int = 48
+    ALERT_SMS_BATCH: int = 100
     ALERT_SMS_MAX_ATTEMPTS: int = 3
-    RISK_MODEL_ALERTS_ENABLED: bool = False       # the livestock-risk heuristic is unvalidated: no farmer alerts until a vet signs off
-    USSD_SERVICE_CODE: str = ""                   # e.g. "*123#" — shown in SMS text only when set
+    RISK_MODEL_ALERTS_ENABLED: bool = False
+    USSD_SERVICE_CODE: str = ""
 
-    # ── Accounts: PIN + consent ──────────────────────────────────────────────
+    # Accounts: PIN and consent
     PIN_MAX_ATTEMPTS: int = 3
     PIN_LOCK_MINUTES: int = 30
-    TERMS_VERSION: str = "2026-11-draft"          # bump when Terms/Privacy change: users are asked to re-accept
+    TERMS_VERSION: str = "2026-11-draft"
 
-    # Real helpline numbers shown to farmers in emergencies. Left blank on purpose:
-    # we never display a number nobody has verified. Set in .env once Agritex / Vet Services confirm them.
+    # Emergency contacts
     VET_SERVICES_CONTACT: str = ""
     AGRITEX_CONTACT: str = ""
 
-    # Connection parts (production): the URLs below are built from these when not given explicitly, so a password
-    # held in a secret file can be used safely (special characters are URL-escaped).
+    # Connection parts (production)
     POSTGRES_HOST: str = ""
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "kohwai"
@@ -118,49 +121,102 @@ class Settings(BaseSettings):
     ALERT_DEDUP_HOURS: int = 6
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3010", "http://localhost:3000", "http://localhost:8000"]
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3010",
+        "http://localhost:3000",
+        "http://localhost:8000"
+    ]
 
     @model_validator(mode="after")
     def _compose_urls(self):
-        given = self.model_fields_set          # anything the operator set explicitly always wins
+        given = self.model_fields_set
+
         if self.POSTGRES_HOST and "DATABASE_URL" not in given:
             pw = quote(self.POSTGRES_PASSWORD, safe="")
-            self.DATABASE_URL = f"postgresql://{self.POSTGRES_USER}:{pw}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            self.DATABASE_URL = (
+                f"postgresql://{self.POSTGRES_USER}:{pw}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+
         if self.REDIS_HOST:
-            auth = f":{quote(self.REDIS_PASSWORD, safe='')}@" if self.REDIS_PASSWORD else ""
+            auth = (
+                f":{quote(self.REDIS_PASSWORD, safe='')}@"
+                if self.REDIS_PASSWORD else ""
+            )
             base = f"redis://{auth}{self.REDIS_HOST}:6379"
+
             if "REDIS_URL" not in given:
                 self.REDIS_URL = f"{base}/0"
             if "CELERY_BROKER_URL" not in given:
                 self.CELERY_BROKER_URL = f"{base}/0"
             if "CELERY_RESULT_BACKEND" not in given:
                 self.CELERY_RESULT_BACKEND = f"{base}/1"
+
         return self
 
     def production_problems(self) -> tuple[list[str], list[str]]:
-        """-> (errors, warnings). Errors make the API refuse to start outside development: each one is a
-        misconfiguration that would expose farmers' data or let anyone act as anyone."""
+        """Return (errors, warnings).
+
+        Errors prevent the API from starting outside development.
+        """
         if self.ENVIRONMENT == "development":
             return [], []
+
         errors, warnings = [], []
+
         if self.SECRET_KEY in ("", "changeme") or len(self.SECRET_KEY) < 32:
-            errors.append("SECRET_KEY must be a random value of at least 32 characters (it signs every login token)")
+            errors.append(
+                "SECRET_KEY must be a random value of at least 32 characters "
+                "(it signs every login token)"
+            )
+
         if self.DEBUG:
             errors.append("DEBUG must be off")
+
         if self.EXPOSE_DEV_OTP:
-            errors.append("EXPOSE_DEV_OTP must be off (it returns login codes in API responses)")
+            errors.append(
+                "EXPOSE_DEV_OTP must be off "
+                "(it returns login codes in API responses)"
+            )
+
         if ":secret@" in self.DATABASE_URL or ":changeme@" in self.DATABASE_URL:
             errors.append("the database is using a default password")
-        if any(("localhost" in o or "127.0.0.1" in o or o.strip() == "*") for o in self.ALLOWED_ORIGINS):
-            errors.append("ALLOWED_ORIGINS must list only your real https origin(s), not localhost or *")
+
+        if any(
+            "localhost" in origin
+            or "127.0.0.1" in origin
+            or origin.strip() == "*"
+            for origin in self.ALLOWED_ORIGINS
+        ):
+            errors.append(
+                "ALLOWED_ORIGINS must list only your real https origin(s), "
+                "not localhost or *"
+            )
+
         if not self.AT_API_KEY:
-            warnings.append("AT_API_KEY is empty: login codes and alert SMS cannot be delivered, so nobody can sign in")
+            warnings.append(
+                "AT_API_KEY is empty: login codes and alert SMS cannot be "
+                "delivered, so nobody can sign in"
+            )
+
         if "@" not in self.REDIS_URL:
             warnings.append("Redis has no password")
+
         if not self.USSD_ALLOWED_IPS.strip():
-            warnings.append("USSD_ALLOWED_IPS is empty: all USSD traffic will be rejected (fail-closed)")
-        if not (self.VET_SERVICES_CONTACT.strip() and self.AGRITEX_CONTACT.strip()):
-            warnings.append("helpline numbers (VET_SERVICES_CONTACT / AGRITEX_CONTACT) are not set: advice will say 'your nearest office'")
+            warnings.append(
+                "USSD_ALLOWED_IPS is empty: all USSD traffic will be rejected "
+                "(fail-closed)"
+            )
+
+        if not (
+            self.VET_SERVICES_CONTACT.strip()
+            and self.AGRITEX_CONTACT.strip()
+        ):
+            warnings.append(
+                "helpline numbers (VET_SERVICES_CONTACT / AGRITEX_CONTACT) "
+                "are not set: advice will say 'your nearest office'"
+            )
+
         return errors, warnings
 
 

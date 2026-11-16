@@ -11,5 +11,6 @@
     "**/node_modules": true
   },
   "editor.rulers": [100],
-  "terminal.integrated.defaultProfile.windows": "PowerShell"
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "python.terminal.useEnvFile": true
 }
