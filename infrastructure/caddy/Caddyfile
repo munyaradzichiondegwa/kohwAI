@@ -1,0 +1,47 @@
+# Reverse proxy + automatic HTTPS (Let's Encrypt). Only this container is exposed to the internet.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(self)"
+		-Server
+	}
+
+	# Nothing here needs big uploads; cap request bodies (photo diagnosis is Phase 2).
+	request_body {
+		max_size 2MB
+	}
+
+	# Prometheus metrics are for the internal network only.
+	@internal path /metrics /metrics/*
+	respond @internal 404
+
+	# API, health, realtime alerts -> FastAPI. (OpenAPI docs are switched off in production by the app.)
+	@api path /api/* /ws/* /health /health/ready
+	handle @api {
+		reverse_proxy api:8000 {
+			# Caddy sets X-Forwarded-For to the real client address; the app's USSD IP allow-list depends on it.
+			health_uri /health
+			health_interval 15s
+			flush_interval -1
+		}
+	}
+
+	# Everything else -> the web app
+	handle {
+		reverse_proxy web:3000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

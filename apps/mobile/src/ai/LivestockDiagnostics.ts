@@ -6,7 +6,9 @@
  *   - top disease class is tagged as "respiratory"
  */
 import * as tf from '@tensorflow/tfjs';
-import '@tensorflow/tfjs-react-native';
+// tfjs-react-native is intentionally not installed yet (Expo SDK 51 / expo-camera conflict, see package.json _notes).
+// Loaded optionally so the app still bundles; inference stays unavailable until it is added.
+try { require('@tensorflow/tfjs-react-native'); } catch { /* optional until Phase 2 */ }
 import * as FileSystem from 'expo-file-system';
 import type { DiagnosisResult, LivestockDiagnosisResult } from '@kohwai/shared/types';
 import { AI_AUDIO_TRIGGER_GATE } from '@kohwai/shared/constants';

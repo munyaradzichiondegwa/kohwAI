@@ -1,0 +1,159 @@
+{
+  "_generated": "DO NOT EDIT BY HAND — run backend/scripts/export_rules.py",
+  "animalTypes": [
+    {
+      "code": "1",
+      "label": "Cattle"
+    },
+    {
+      "code": "4",
+      "label": "Poultry"
+    }
+  ],
+  "cropRules": {
+    "1|1": {
+      "action": "Remove infected plants. Apply fertiliser. Plant resistant varieties next season.",
+      "disease1": "Maize Streak Virus",
+      "disease2": "Nitrogen Deficiency",
+      "ussd": "Remove infected plants; feed with fertiliser."
+    },
+    "1|2": {
+      "action": "Remove infected heads. Apply recommended fungicide.",
+      "disease1": "Ergot",
+      "disease2": "Leaf Rust",
+      "ussd": "Remove infected heads; use fungicide."
+    },
+    "2|1": {
+      "action": "Check soil moisture. Improve drainage. Contact Agritex.",
+      "disease1": "Drought Stress",
+      "disease2": "Root Rot",
+      "ussd": "Check soil moisture and drainage."
+    },
+    "3|1": {
+      "action": "Apply recommended pesticide within 24h. Check neighbouring fields.",
+      "disease1": "Fall Armyworm",
+      "disease2": "Spotted Stem Borer",
+      "ussd": "Spray recommended pesticide within 24h."
+    },
+    "4|1": {
+      "action": "Apply fungicide. Improve air circulation. Rotate crops.",
+      "disease1": "Gray Leaf Spot",
+      "disease2": "Powdery Mildew",
+      "ussd": "Apply fungicide; rotate crops."
+    },
+    "5|1": {
+      "action": "Hand-weed Striga. Apply herbicide. Use resistant varieties.",
+      "disease1": "Striga (Witchweed)",
+      "disease2": "Soil Compaction",
+      "ussd": "Hand-weed Striga; use resistant seed."
+    }
+  },
+  "cropSymptoms": [
+    {
+      "code": "1",
+      "label": "Yellowing / discoloured leaves",
+      "short": "Yellow leaves"
+    },
+    {
+      "code": "2",
+      "label": "Wilting despite watering",
+      "short": "Wilting"
+    },
+    {
+      "code": "3",
+      "label": "Chewed leaves / visible pests",
+      "short": "Holes/chewed leaves"
+    },
+    {
+      "code": "4",
+      "label": "Grey or white powdery spots",
+      "short": "White/grey powder"
+    },
+    {
+      "code": "5",
+      "label": "Stunted growth / weeds around roots",
+      "short": "Stunted growth"
+    }
+  ],
+  "cropTypes": [
+    {
+      "code": "1",
+      "label": "Maize"
+    },
+    {
+      "code": "2",
+      "label": "Sorghum / Small grains"
+    }
+  ],
+  "livestockRules": {
+    "1|1": {
+      "action": "ISOLATE immediately. Vaccinate herd. Report to {vet}.",
+      "disease": "Lumpy Skin Disease",
+      "notifiable": true,
+      "ussd": "ISOLATE animal. Report to {vet}."
+    },
+    "1|4": {
+      "action": "Isolate affected birds. Improve housing. Ask {vet} about vaccination.",
+      "disease": "Fowl Pox",
+      "notifiable": false,
+      "ussd": "Isolate birds; ask {vet} about vaccine."
+    },
+    "2|1": {
+      "action": "Isolate sick animals. Provide shelter. Contact {vet}.",
+      "disease": "Bovine Respiratory Disease",
+      "notifiable": false,
+      "ussd": "Isolate sick animals; contact {vet}."
+    },
+    "2|4": {
+      "action": "Isolate sick birds and disinfect housing. Ask {vet} about vaccination and reporting.",
+      "disease": "Newcastle Disease",
+      "notifiable": false,
+      "ussd": "Isolate birds; contact {vet}."
+    },
+    "3|1": {
+      "action": "NOTIFIABLE: Restrict movement. Report to {vet} immediately.",
+      "disease": "Foot and Mouth Disease",
+      "notifiable": true,
+      "ussd": "Restrict movement. Report to {vet} NOW."
+    },
+    "4|1": {
+      "action": "Treat only on {vet} advice (antibiotics need a vet). Control ticks.",
+      "disease": "Anaplasmosis",
+      "notifiable": false,
+      "ussd": "Control ticks; ask {vet} about treatment."
+    },
+    "5|1": {
+      "action": "NOTIFIABLE EMERGENCY: Do not touch or open the carcass. Contact {vet} NOW.",
+      "disease": "Anthrax",
+      "notifiable": true,
+      "ussd": "Do NOT touch carcass. Contact {vet} NOW."
+    }
+  },
+  "livestockSymptoms": [
+    {
+      "code": "1",
+      "label": "Skin nodules / lumps",
+      "short": "Skin lumps"
+    },
+    {
+      "code": "2",
+      "label": "Coughing / laboured breathing",
+      "short": "Coughing/breathing"
+    },
+    {
+      "code": "3",
+      "label": "Blisters on mouth or feet",
+      "short": "Mouth/foot blisters"
+    },
+    {
+      "code": "4",
+      "label": "Lethargy / tick infestation",
+      "short": "Lethargy/ticks"
+    },
+    {
+      "code": "5",
+      "label": "Sudden death / bleeding from openings",
+      "short": "Sudden death/bleeding"
+    }
+  ]
+}

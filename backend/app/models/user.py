@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.models.base import Base, UUIDMixin, TimestampMixin
@@ -14,6 +14,15 @@ class User(Base, UUIDMixin, TimestampMixin):
     fcm_token      = Column(String(512), nullable=True)
     ussd_language  = Column(String(5),   default="en")
     data_export_requested_at = Column(DateTime(timezone=True), nullable=True)
+    # When the person accepted the Terms & Privacy Policy (PRD: explicit consent at registration).
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    terms_version     = Column(String(30), nullable=True)
+    # Receive alert SMS for my district (consented to at registration; can be switched off).
+    sms_alerts        = Column(Boolean, nullable=False, default=True, server_default="true")
+    # USSD / account PIN. Never stored in clear: HMAC(secret, phone:pin) then bcrypt. See modules/identity/pin.py
+    pin_hash            = Column(String(128), nullable=True)
+    pin_failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    pin_locked_until    = Column(DateTime(timezone=True), nullable=True)
     diagnoses = relationship("DiagnosisReport", back_populates="user")
     livestock  = relationship("LivestockProfile",  back_populates="owner")
     listings   = relationship("MarketListing",     back_populates="seller")
@@ -30,8 +39,7 @@ class OTPLog(Base, UUIDMixin, TimestampMixin):
 class AuditLog(Base, UUIDMixin):
     """Immutable. No UPDATE or DELETE ever issued against this table."""
     __tablename__ = "audit_logs"
-    from sqlalchemy import DateTime as DT, func as fn
-    timestamp   = Column(DT(timezone=True), server_default="now()", nullable=False, index=True)
+    timestamp   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     user_id     = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     action      = Column(String(100), nullable=False, index=True)
     entity_type = Column(String(100), nullable=False)

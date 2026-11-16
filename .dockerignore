@@ -1,0 +1,12 @@
+.git
+.github
+**/node_modules
+**/.next
+**/.env
+**/.env.*
+secrets
+backups
+backend/tests
+apps/mobile
+docs
+ai

@@ -1,4 +1,5 @@
 # FastAPI router for Simba — Energy & Infrastructure
+from app.utils.validation import required_district
 from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps import get_current_user
@@ -12,7 +13,7 @@ router = APIRouter()
 @router.get("/battery-forecast", response_model=BatteryForecastOut,
             summary="48-hour battery forecast from real NASA POWER solar irradiance")
 def battery_forecast(
-    district: str = Query(...),
+    district: str = Depends(required_district),
     battery_capacity_wh: float = Query(..., gt=0, description="Total battery bank capacity in Wh"),
     panel_watts: float = Query(..., gt=0, description="Total solar panel rated wattage"),
     current_pct: float = Query(80, ge=0, le=100, description="Current battery charge %"),

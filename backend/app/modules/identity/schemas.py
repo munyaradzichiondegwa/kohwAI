@@ -1,6 +1,8 @@
 # Pydantic schemas for Identity & Access
-from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List, Literal
+
+from app.utils.validation import District
 from datetime import datetime
 import re
 
@@ -25,11 +27,16 @@ class OTPRequest(BaseModel):
         return normalise_phone(v)
 
 
+Language = Literal["en", "sn", "nd"]
+
+
 class OTPVerify(BaseModel):
     phone: str
-    otp: str
-    language: Optional[str] = "en"
-    district: Optional[str] = None
+    otp: str = Field(..., min_length=4, max_length=8)
+    language: Optional[Language] = "en"
+    district: Optional[District] = None
+    # Required (true) when this phone number is registering for the first time. See identity/service.verify_otp.
+    accept_terms: bool = False
 
     @field_validator("phone")
     @classmethod
@@ -48,6 +55,10 @@ class UserOut(BaseModel):
     district: Optional[str] = None
     roles: List[str] = []
     created_at: Optional[datetime] = None
+    # true until the current Terms & Privacy Policy version has been accepted
+    needs_consent: bool = False
+    sms_alerts: bool = True
+    has_pin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -60,6 +71,19 @@ class TokenResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    language: Optional[str] = None
-    district: Optional[str] = None
-    fcm_token: Optional[str] = None
+    language: Optional[Language] = None
+    district: Optional[District] = None
+    fcm_token: Optional[str] = Field(None, max_length=512)
+    sms_alerts: Optional[bool] = None
+
+
+class ConsentRequest(BaseModel):
+    accept: bool
+
+
+class PinSetRequest(BaseModel):
+    pin: str = Field(..., pattern=r"^\d{4}$")
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm: bool

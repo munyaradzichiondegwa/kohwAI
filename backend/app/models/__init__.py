@@ -9,3 +9,4 @@ from app.models.community import CommunityReport, ValidatorAssignment
 from app.models.satellite import SatelliteReading
 from app.models.settings   import PlatformSetting
 from app.models.intelligence import CrossPillarInsight
+from app.models.alerts import AlertDelivery  # noqa: E402,F401

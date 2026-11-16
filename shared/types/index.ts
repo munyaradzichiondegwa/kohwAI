@@ -49,25 +49,34 @@ export interface Borehole {
   id: string;
   name: string;
   village: string;
+  district?: string;
   lat: number;
   lng: number;
-  status: 'working' | 'low' | 'dry';
-  lastVerified: string;
+  /** Last status CONFIRMED by a validator/admin. */
+  status: 'working' | 'low' | 'dry' | 'broken';
+  lastVerified?: string | null;
+  /** True once a validator/admin has ever confirmed this borehole. */
+  verified?: boolean;
+  /** Newest community report still awaiting validation — show it as UNVERIFIED. */
+  pendingReport?: 'working' | 'low' | 'dry' | 'broken' | null;
+  pendingReports?: number;
   verifiedBy?: string;
 }
 
 export interface MarketListing {
   id: string;
-  type: 'seed' | 'produce' | 'livestock' | 'aid';
+  type: 'seed' | 'produce' | 'livestock' | 'input';
   title: string;
-  description: string;
+  description?: string | null;
   quantity: number;
   unit: string;
   priceUsd: number;
   district: string;
-  sellerPhone: string;   // masked in UI
+  /** Present only when the seller opted in to sharing their number. */
+  sellerPhone?: string | null;
+  isMine?: boolean;
   aiVerifiedHealthy?: boolean;
-  expiresAt: string;
+  expiresAt?: string | null;
 }
 
 export interface UserProfile {
@@ -77,4 +86,8 @@ export interface UserProfile {
   district: string;
   roles: ('farmer' | 'validator' | 'admin' | 'ngo')[];
   createdAt: string;
+  /** true until the current Terms & Privacy Policy version has been accepted */
+  needsConsent?: boolean;
+  smsAlerts?: boolean;
+  hasPin?: boolean;
 }

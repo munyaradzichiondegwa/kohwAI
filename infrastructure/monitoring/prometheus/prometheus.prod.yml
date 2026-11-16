@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: kohwai_api
+    metrics_path: /metrics        # served by the API on the internal network only; the public proxy answers 404 for /metrics
+    static_configs:
+      - targets: ['api:8000']

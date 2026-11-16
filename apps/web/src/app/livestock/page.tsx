@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import AppShell from '@/components/layout/AppShell';
-import { apiClient } from '@/lib/api';
+import { apiClient, isOfflineError } from '@/lib/api';
 import { db } from '@/lib/db';
 import { LIVESTOCK_SYMPTOMS, ANIMAL_TYPES, diagnoseLivestock } from '@/lib/rulesEngine';
 
@@ -22,13 +22,15 @@ export default function LivestockPage() {
     try {
       const res = await apiClient.post('/livestock/diagnose', { animal_type_code: animal, symptom_code: symptom });
       setResult({ disease: res.data.disease, action: res.data.action, notifiable: res.data.notifiable, source: 'server' });
-    } catch {
+    } catch (e) {
       const local = diagnoseLivestock(symptom, animal);
       setResult({ disease: local.disease, action: local.action, notifiable: !!local.notifiable, source: 'offline' });
-      await db.diagnosisQueue.add({
-        kind: 'livestock', animalType: animal, symptom, disease1: local.disease, action: local.action,
-        createdAt: new Date().toISOString(), synced: false,
-      });
+      if (isOfflineError(e)) {       // only queue for later sync when we were genuinely offline
+        await db.diagnosisQueue.add({
+          kind: 'livestock', animalType: animal, symptom, disease1: local.disease, action: local.action,
+          createdAt: new Date().toISOString(), synced: 0,
+        });
+      }
     } finally { setLoading(false); }
   }
 
@@ -47,7 +49,7 @@ export default function LivestockPage() {
     <AppShell title="Livestock Health">
       <section className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">🐄 Livestock symptom checker</h1>
-        <p className="text-sm text-gray-500 mt-1">Works offline. Confirm with Zimbabwe Veterinary Services (0800-VET, free).</p>
+        <p className="text-sm text-gray-500 mt-1">Works offline. This is a symptom guide, not a diagnosis — confirm with Veterinary Services.</p>
       </section>
 
       {!result && (

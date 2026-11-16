@@ -1,38 +1,37 @@
-"""Celery worker: ingests NASA POWER satellite data every 6 hours."""
+"""Celery worker: ingests NASA POWER satellite data every 6 hours and stores daily history."""
+import logging
+
 from app.core.celery_app import celery_app
 from app.core.database import SessionLocal
-from app.core.config import settings
-from app.core.redis_client import set_cached
-import requests, logging
-from datetime import date
+from app.utils.readings import store_readings
+from app.utils.satellite import DISTRICTS, fetch_nasa_power
 
 logger = logging.getLogger(__name__)
 
-DISTRICTS = {
-    "Chipinge": (-20.19, 32.62), "Gokwe": (-18.22, 28.94),
-    "Matopos":  (-20.47, 28.50), "Binga":  (-17.62, 27.34),
-    "Nyanga":   (-18.22, 32.75), "Harare": (-17.83, 31.05),
-}
+BACKFILL_DAYS = 45   # re-fetch a rolling window: fills late-published days and heals gaps
 
 
 @celery_app.task(name="app.workers.satellite.ingest_nasa_power", bind=True, max_retries=3)
 def ingest_nasa_power(self):
-    """Fetch today's NASA POWER weather data for all districts."""
-    today = date.today().isoformat().replace("-", "")
-    for district, (lat, lon) in DISTRICTS.items():
-        try:
-            url = (
-                f"{settings.NASA_POWER_BASE_URL}"
-                f"?parameters=T2M,PRECTOTCORR,ALLSKY_SFC_SW_DWN"
-                f"&community=AG&longitude={lon}&latitude={lat}"
-                f"&start={today}&end={today}&format=JSON"
-            )
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()["properties"]["parameter"]
-            set_cached(f"weather:{district}", data, ttl_seconds=6 * 3600)
-            logger.info(f"NASA POWER data ingested for {district}")
-            # TODO: Persist to TimescaleDB hypertable
-        except Exception as exc:
-            logger.error(f"Failed to ingest NASA POWER for {district}: {exc}")
-            self.retry(exc=exc, countdown=300)
+    """Fetch the last ~45 days for every district and upsert them (idempotent).
+    One failing district no longer aborts the others; failures are retried together."""
+    failed: list[str] = []
+    stored = 0
+    db = SessionLocal()
+    try:
+        for district in DISTRICTS:
+            try:
+                data = fetch_nasa_power(district, days_back=BACKFILL_DAYS, use_cache=False)
+                if data is None:
+                    raise RuntimeError("NASA POWER returned no data")
+                stored += store_readings(db, district, data)
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                logger.error("Satellite ingest failed for %s: %s", district, exc)
+                failed.append(district)
+    finally:
+        db.close()
+    logger.info("Satellite ingest: %d rows upserted, %d/%d districts failed", stored, len(failed), len(DISTRICTS))
+    if failed:
+        raise self.retry(exc=RuntimeError(f"failed districts: {failed}"), countdown=300)
+    return {"rows": stored, "failed": failed}

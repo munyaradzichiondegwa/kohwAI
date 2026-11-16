@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.workers.risk_model",
         "app.workers.alerts",
         "app.workers.insurance",
+        "app.workers.intelligence",
     ],
 )
 
@@ -23,6 +24,8 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    # Beat/send_task use the default queue; the worker command (-Q default,...) must listen on it.
+    task_default_queue="default",
 )
 
 celery_app.conf.beat_schedule = {
@@ -40,6 +43,11 @@ celery_app.conf.beat_schedule = {
     "check-insurance-triggers": {
         "task": "app.workers.insurance.check_drought_payouts",
         "schedule": crontab(minute=30, hour=2),
+    },
+    # District-wide cross-pillar rules (pest outbreak clustering, rains onset)
+    "evaluate-district-rules": {
+        "task": "app.workers.intelligence.evaluate_districts",
+        "schedule": crontab(minute=15, hour="*/3"),
     },
     # Dispatch pending alerts every 5 minutes
     "dispatch-alerts": {

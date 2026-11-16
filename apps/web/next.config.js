@@ -4,15 +4,10 @@ const withPWA = require('next-pwa')({
   skipWaiting: true,
   disable: process.env.NODE_ENV === 'development',
   runtimeCaching: [
-    {
-      urlPattern: /^\/api\//,
-      handler: 'NetworkFirst',
-      options: {
-        cacheName: 'api-cache',
-        networkTimeoutSeconds: 10,
-        expiration: { maxEntries: 200, maxAgeSeconds: 24 * 60 * 60 },
-      },
-    },
+    // NOTE: API responses are deliberately NOT cached by the service worker. They are authenticated personal data
+    // (a shared phone would leak one farmer's records to the next), and the app keeps its own offline copy of the
+    // few things that need it in IndexedDB (lib/offline.ts). The old rule here was also unreachable: a `^`-anchored
+    // regex never matches Workbox's full-URL string.
     {
       urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/,
       handler: 'CacheFirst',
@@ -27,8 +22,8 @@ const nextConfig = {
   output: 'standalone',
   images: { unoptimized: true },
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
-    NEXT_PUBLIC_WS_URL:  process.env.NEXT_PUBLIC_WS_URL  || 'ws://localhost:8000',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000',   // '' = same origin (production)
+    NEXT_PUBLIC_WS_URL:  process.env.NEXT_PUBLIC_WS_URL  ?? 'ws://localhost:8000',
   },
 };
 

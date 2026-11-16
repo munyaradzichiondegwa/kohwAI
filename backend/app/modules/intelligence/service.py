@@ -16,12 +16,13 @@ from app.models.mvura import Borehole
 from app.models.livestock import LivestockProfile
 from app.models.user import User
 from app.models.alerts import Alert
-from app.utils.risk import compute_drought_index
+from app.modules.ussd.rules_engine import vet_contact
 
 DROUGHT_KEYWORDS = ("drought", "wilting")
-PEST_OUTBREAK_THRESHOLD = 3       # disclosed: >=3 independent sightings, same species+district, in 7 days
+PEST_OUTBREAK_THRESHOLD = 3       # disclosed: >=3 sightings from >=3 DIFFERENT farmers, same species+district, in 7 days (rejected ones excluded)
 PEST_OUTBREAK_WINDOW_DAYS = 7
 DEDUPE_WINDOW_HOURS = 24
+SICK_ANIMAL_RECENCY_DAYS = 14
 
 
 def _already_has_recent(db: Session, user_id, district: str, insight_type: str, hours: int) -> bool:
@@ -71,14 +72,15 @@ def evaluate_for_user(db: Session, user: User) -> list[CrossPillarInsight]:
     # (disease + water stress often compound), and nudge toward Vet Services.
     sick_animal = (
         db.query(LivestockProfile)
-        .filter(LivestockProfile.owner_id == user.id, LivestockProfile.health_status == "sick")
+        .filter(LivestockProfile.owner_id == user.id, LivestockProfile.health_status == "sick",
+                LivestockProfile.last_diagnosed >= datetime.now(timezone.utc) - timedelta(days=SICK_ANIMAL_RECENCY_DAYS))
         .order_by(LivestockProfile.last_diagnosed.desc())
         .first()
     )
     if sick_animal and not _already_has_recent(db, user.id, district, "livestock_followup", DEDUPE_WINDOW_HOURS):
         msg = (
             f"{sick_animal.name} was recently flagged sick. If this spreads to other animals, "
-            "report it in Community so nearby farmers are warned, and contact Zimbabwe Veterinary Services (0800-VET)."
+            "report it in Community so nearby farmers are warned, and contact {vet_contact()}."
         )
         insight = CrossPillarInsight(user_id=user.id, district=district, source_pillar="livestock",
                                       target_pillar="community", insight_type="livestock_followup",
@@ -99,22 +101,25 @@ def evaluate_pest_outbreak(db: Session, district: str) -> CrossPillarInsight | N
     community alert, not just leave each sighting siloed."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=PEST_OUTBREAK_WINDOW_DAYS)
     rows = (
-        db.query(PestSighting.species, PestSighting.id)
-        .filter(PestSighting.district == district, PestSighting.created_at >= cutoff)
+        db.query(PestSighting.species, PestSighting.user_id)
+        .filter(PestSighting.district == district, PestSighting.created_at >= cutoff,
+                PestSighting.status != "rejected")          # a validator already said "not real"
         .all()
     )
-    counts: dict[str, int] = {}
-    for species, _ in rows:
-        counts[species] = counts.get(species, 0) + 1
+    reporters: dict[str, set] = {}
+    for species, uid in rows:
+        reporters.setdefault(species, set()).add(uid)        # distinct farmers, not distinct rows
 
-    for species, count in counts.items():
+    first_created = None
+    for species, who in reporters.items():
+        count = len(who)
         if count < PEST_OUTBREAK_THRESHOLD:
             continue
         insight_type = f"pest_outbreak:{species}"
         if _already_has_recent(db, None, district, insight_type, hours=72):
             continue
         msg = (
-            f"{count} independent reports of {species} in {district} over the last "
+            f"{count} different farmers reported {species} in {district} over the last "
             f"{PEST_OUTBREAK_WINDOW_DAYS} days — this looks like a spreading outbreak, not an isolated case."
         )
         insight = CrossPillarInsight(user_id=None, district=district, source_pillar="community",
@@ -122,11 +127,13 @@ def evaluate_pest_outbreak(db: Session, district: str) -> CrossPillarInsight | N
                                       severity="red", message=msg)
         db.add(insight)
         db.add(Alert(pillar="zunde", type="pest", severity="red", title=f"{species} outbreak reported",
-                      body=msg, district=district))
+                      body=msg, district=district, source="intelligence",
+                      extra_data={"requires_validation": True, "species": species},   # SMS held until a validator approves a report
+                      expires_at=datetime.now(timezone.utc) + timedelta(days=7)))
         db.commit()
         db.refresh(insight)
-        return insight
-    return None
+        first_created = first_created or insight       # keep going: other species may also qualify
+    return first_created
 
 
 def evaluate_rains_onset(db: Session, district: str) -> CrossPillarInsight | None:
@@ -166,7 +173,9 @@ def list_insights(db: Session, user: User) -> list[CrossPillarInsight]:
 
 def dismiss(db: Session, insight_id: str, user: User) -> bool:
     insight = db.query(CrossPillarInsight).filter(CrossPillarInsight.id == insight_id).first()
-    if not insight or (insight.user_id and str(insight.user_id) != str(user.id)):
+    # Only a farmer's OWN insights can be dismissed. District-wide insights (user_id NULL) are shared;
+    # letting one farmer dismiss them would hide the warning from everyone else in the district.
+    if not insight or str(insight.user_id) != str(user.id):
         return False
     insight.dismissed = True
     db.commit()

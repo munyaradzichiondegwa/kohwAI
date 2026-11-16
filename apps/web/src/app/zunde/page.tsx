@@ -1,13 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AppShell from '@/components/layout/AppShell';
-import ConfidenceBar from '@/components/ui/ConfidenceBar';
-import { apiClient } from '@/lib/api';
+import { apiClient, isOfflineError } from '@/lib/api';
 import { db } from '@/lib/db';
 import { CROP_SYMPTOMS, CROP_TYPES, diagnoseCrop } from '@/lib/rulesEngine';
 import { useAuthStore } from '@/stores/authStore';
 
-type DiagResult = { disease1: string; disease2: string; action: string; source: 'server' | 'offline' };
+type DiagResult = { disease1: string; disease2: string | null; action: string; source: 'server' | 'offline' };
 
 export default function ZundePage() {
   const user = useAuthStore(s => s.user);
@@ -27,32 +26,43 @@ export default function ZundePage() {
         disease1: res.data.top_disease, disease2: res.data.second_disease,
         action: res.data.action, source: 'server',
       });
-    } catch {
+    } catch (e) {
       const local = diagnoseCrop(symptom, crop);
       setResult({ disease1: local.disease1, disease2: local.disease2, action: local.action, source: 'offline' });
-      await db.diagnosisQueue.add({
-        kind: 'crop', cropType: crop, symptom, disease1: local.disease1, disease2: local.disease2,
-        action: local.action, createdAt: new Date().toISOString(), synced: false,
-      });
+      if (isOfflineError(e)) {       // only queue for later sync when we were genuinely offline
+        await db.diagnosisQueue.add({
+          kind: 'crop', cropType: crop, symptom, disease1: local.disease1, disease2: local.disease2 ?? undefined,
+          action: local.action, createdAt: new Date().toISOString(), synced: 0,
+        });
+      }
     } finally {
       setLoading(false);
     }
   }
 
+  // Pest reports use a fixed species list (free text never matched, so outbreak detection could not work).
+  const [pestSpecies, setPestSpecies] = useState<string[]>([]);
+  const [species, setSpecies] = useState('');
+  const [severity, setSeverity] = useState<'low' | 'medium' | 'high'>('medium');
+  const [pestMsg, setPestMsg] = useState<string | null>(null);
+  useEffect(() => { apiClient.get('/zunde/reference/pest-species').then(r => setPestSpecies(r.data)).catch(() => {}); }, []);
+
   async function reportPest() {
-    if (!result) return;
+    if (!species) { setPestMsg('Choose the pest first.'); return; }
+    if (!user?.district) { setPestMsg('Set your district first.'); return; }
     try {
-      await apiClient.post('/zunde/pest-sightings', {
-        species: result.disease1, severity: 'medium', district: user?.district || 'Harare',
-      });
-    } catch { /* already queued offline via diagnosisQueue when the diagnosis itself was offline */ }
-    setPestReported(true);
+      await apiClient.post('/zunde/pest-sightings', { species, severity, district: user.district });
+      setPestReported(true); setPestMsg('Sent to community validators in your district ✓');
+    } catch (e: any) {
+      setPestMsg(e?.offline ? 'You are offline — please send this report again when you have signal.' : (e?.detail || 'Could not send the report.'));
+    }
   }
 
   async function loadCalendar() {
     setCalendarLoading(true);
     try {
-      const res = await apiClient.get(`/zunde/planting-calendar?district=${user?.district || 'Harare'}`);
+      if (!user?.district) { setCalendar({ error: true }); setCalendarLoading(false); return; }
+      const res = await apiClient.get('/zunde/planting-calendar', { params: { district: user.district } });
       setCalendar(res.data);
     } catch {
       setCalendar({ error: true });
@@ -118,18 +128,32 @@ export default function ZundePage() {
               <span className="text-xs bg-brand-blue/10 text-brand-blue px-2 py-0.5 rounded-full">Saved offline</span>
             )}
           </div>
-          <ConfidenceBar label={result.disease1} confidence={0.7} />
-          {result.disease2 && <ConfidenceBar label={`Also possible: ${result.disease2}`} confidence={0.35} />}
+          {result.disease2 && <p className="text-sm text-gray-600">Also possible: {result.disease2}</p>}
           <div className="bg-brand-amber/10 border border-brand-amber/30 rounded-lg p-3 mt-3 text-sm text-gray-800">
             <strong>Recommended action:</strong> {result.action}
           </div>
           <p className="text-xs text-gray-500 mt-3">
             This is a symptom guide, not an AI diagnosis. Confirm with your local Agritex officer.
           </p>
+          <div className="mt-4 border-t border-gray-100 pt-3">
+            <p className="text-xs font-medium text-gray-700 mb-1">Seeing pests? Report them to your district validators:</p>
+            <div className="flex gap-2">
+              <select value={species} onChange={e => setSpecies(e.target.value)} disabled={pestReported}
+                className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                <option value="">Which pest?</option>
+                {pestSpecies.map(sp => <option key={sp} value={sp}>{sp}</option>)}
+              </select>
+              <select value={severity} onChange={e => setSeverity(e.target.value as any)} disabled={pestReported}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+                <option value="low">A few plants</option><option value="medium">Part of field</option><option value="high">Whole field</option>
+              </select>
+            </div>
+            {pestMsg && <p className="text-xs text-gray-600 mt-1">{pestMsg}</p>}
+          </div>
           <div className="flex gap-2 mt-4">
             <button onClick={reportPest} disabled={pestReported}
               className="flex-1 bg-brand-red text-white rounded-xl py-2 text-sm font-medium disabled:opacity-50">
-              {pestReported ? 'Reported ✓' : 'Report to community'}
+              {pestReported ? 'Reported ✓' : 'Report pest to community'}
             </button>
             <button onClick={reset} className="flex-1 border border-gray-300 rounded-xl py-2 text-sm font-medium">
               Check again
