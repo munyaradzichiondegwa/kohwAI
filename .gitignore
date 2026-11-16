@@ -31,3 +31,6 @@ backend/.pytest_cache/
 /offline/
 .env.prod
 /backups/
+
+# Local Redis recovery backups (never commit)
+/backend/redis-recovery-backup/
