@@ -9,11 +9,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _secrets_dir() -> str | None:
-    """Docker/Compose mounts secrets as files in /run/secrets (one file per secret, named exactly like the setting).
-    Reading them here keeps passwords and keys out of environment variables, `docker inspect` and process listings."""
+    """Docker/Compose mounts secrets as files in /run/secrets
+    (one file per secret, named exactly like the setting).
+
+    Reading them here keeps passwords and keys out of environment
+    variables, docker inspect and process listings.
+    """
     explicit = os.environ.get("SECRETS_DIR")
     if explicit:
         return explicit
+
     return "/run/secrets" if os.path.isdir("/run/secrets") else None
 
 
@@ -26,7 +31,7 @@ class Settings(BaseSettings):
         env_file=str(_REPO_ROOT_ENV),
         secrets_dir=_secrets_dir(),
         case_sensitive=True,
-        extra="ignore"
+        extra="ignore",
     )
 
     # App
@@ -92,7 +97,8 @@ class Settings(BaseSettings):
     # Africa's Talking
     AT_API_KEY: str = ""
     AT_USERNAME: str = ""
-    AT_SHORTCODE: str = "123"
+    # Leave empty until Africa's Talking approves a sender ID / shortcode.
+    AT_SHORTCODE: str = ""
 
     # EcoCash
     ECOCASH_API_KEY: str = ""
@@ -108,7 +114,9 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
 
     # NASA POWER
-    NASA_POWER_BASE_URL: str = "https://power.larc.nasa.gov/api/temporal/daily/point"
+    NASA_POWER_BASE_URL: str = (
+        "https://power.larc.nasa.gov/api/temporal/daily/point"
+    )
 
     # Sentry
     SENTRY_DSN: str = ""
@@ -124,7 +132,8 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3010",
         "http://localhost:3000",
-        "http://localhost:8000"
+        "http://localhost:3001",
+        "http://localhost:8000",
     ]
 
     @model_validator(mode="after")
@@ -141,14 +150,17 @@ class Settings(BaseSettings):
         if self.REDIS_HOST:
             auth = (
                 f":{quote(self.REDIS_PASSWORD, safe='')}@"
-                if self.REDIS_PASSWORD else ""
+                if self.REDIS_PASSWORD
+                else ""
             )
             base = f"redis://{auth}{self.REDIS_HOST}:6379"
 
             if "REDIS_URL" not in given:
                 self.REDIS_URL = f"{base}/0"
+
             if "CELERY_BROKER_URL" not in given:
                 self.CELERY_BROKER_URL = f"{base}/0"
+
             if "CELERY_RESULT_BACKEND" not in given:
                 self.CELERY_RESULT_BACKEND = f"{base}/1"
 

@@ -4,8 +4,7 @@
   "private": true,
   "workspaces": [
     "apps/web",
-    "apps/mobile",
-    "shared"
+    "apps/mobile"
   ],
   "scripts": {
     "dev:web": "npm run dev --workspace=apps/web",
@@ -13,9 +12,5 @@
     "build:web": "npm run build --workspace=apps/web",
     "lint": "npm run lint --workspaces"
   },
-  "overrides": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
-  },
-  "_notes": "Use: npm install --legacy-peer-deps at root and in each app"
+  "_notes": "Install dependencies from the repository root using npm install --legacy-peer-deps."
 }

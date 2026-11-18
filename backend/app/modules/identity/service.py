@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.core.redis_client import redis_client
 from app.models.user import User, OTPLog
-from app.utils.sms import send_sms
+from app.utils.sms import gateway_configured, send_sms_detailed
 from app.utils.audit import write_audit_log
 from app.modules.identity.schemas import UserOut
 
@@ -60,17 +60,46 @@ def request_otp(db: Session, phone: str, ip: str = "") -> dict:
     db.add(otp_log)
     db.commit()
 
+    delivery_status = "not_configured"
     dev_otp = None
-    if settings.AT_API_KEY:
-        send_sms([phone], f"Your KohwAI verification code is {otp}. Valid for {OTP_TTL_MINUTES} minutes.")
+
+    if gateway_configured():
+        delivery = send_sms_detailed(
+            [phone],
+            f"Your KohwAI verification code is {otp}. Valid for {OTP_TTL_MINUTES} minutes.",
+        ).get(phone)
+        if delivery and delivery.ok:
+            # Provider acceptance is not the same as confirmed handset delivery.
+            delivery_status = "accepted"
+        elif delivery and delivery.uncertain:
+            # Keep this OTP valid. The provider may have accepted the send before
+            # a timeout/5xx occurred; automatically failing over could duplicate it.
+            delivery_status = "unknown"
+        else:
+            otp_log.used = True
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The SMS providers did not accept the verification message. Please try again later.",
+            )
     elif settings.ENVIRONMENT == "development" and settings.EXPOSE_DEV_OTP:
-        # Explicit opt-in, development only. Any other environment fails closed:
-        # without an SMS gateway the code is simply not delivered.
+        # Explicit opt-in for local development only.
         dev_otp = otp
+        delivery_status = "development"
+    else:
+        otp_log.used = True
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SMS delivery is not configured. Please try again later.",
+        )
 
-    return {"phone": phone, "expires_in_seconds": OTP_TTL_MINUTES * 60, "dev_otp": dev_otp}
-
-
+    return {
+        "phone": phone,
+        "expires_in_seconds": OTP_TTL_MINUTES * 60,
+        "dev_otp": dev_otp,
+        "delivery_status": delivery_status,
+    }
 def verify_otp(db: Session, phone: str, otp: str, language: str, district: str | None, ip: str = "",
                accept_terms: bool = False) -> tuple[User, str, str]:
     otp_log = (

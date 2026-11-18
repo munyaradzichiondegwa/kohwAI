@@ -1,0 +1,23 @@
+Subject: Request for Econet Wireless A2P API Integration Documentation and Sandbox Access - KohwAI
+
+Hello Econet A2P / API Marketplace Team,
+
+I am integrating Econet Wireless Application-to-Person (A2P) messaging into KohwAI, a Zimbabwe-focused agricultural climate-resilience platform. We intend to use A2P for transactional one-time passwords (OTPs), account verification, and essential service notifications.
+
+Please provide the technical onboarding package for direct A2P integration, including:
+
+1. Sandbox and production base URLs and the SMS send endpoint.
+2. Authentication method, credentials provisioning, token renewal, and required request headers.
+3. Request and response schemas, including recipient number format and sender ID/shortcode parameters.
+4. Message acceptance, rejection, duplicate detection, and retry semantics.
+5. Message IDs and delivery receipt (DLR) or webhook specifications.
+6. Throughput limits, pricing, sender ID registration requirements, IP allowlisting, and service-level commitments.
+7. Confirmation of whether the A2P route supports Econet subscribers only or can reach subscribers on NetOne and Telecel.
+8. Any additional documentation or business verification required for live transactional OTP traffic.
+
+Our architecture keeps OTP generation, hashing, expiry, rate limiting and verification within KohwAI. Econet A2P will be used as a direct SMS transport provider.
+
+Please advise the appropriate onboarding steps and provide access to the sandbox/API documentation so that we can implement and test against the supported contract.
+
+Regards,
+KohwAI Engineering Team

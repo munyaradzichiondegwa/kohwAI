@@ -7,6 +7,7 @@
 secrets
 backups
 backend/tests
-apps/mobile
+apps/mobile/**
+!apps/mobile/package.json
 docs
 ai
